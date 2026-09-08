@@ -240,6 +240,9 @@ export interface HealthFrame {
 // ---------------------------------------------------------------------------
 export interface MissionTick {
   slow: SlowFrame;
+  /** The second engine. Twin-engined platform, so this is a free reference
+   *  channel: common-mode variation cancels exactly in the difference. */
+  slowB?: SlowFrame;
   fast: FastFeatures;
   health: HealthFrame;
   /** What the twin PREDICTED the slow channels would read. The gap between

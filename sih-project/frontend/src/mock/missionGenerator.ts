@@ -84,6 +84,7 @@ export const SCRIPT_BEATS = [
   { t: 95, label: 'Isolation: injector fouling, cyl 2' },
   { t: 140, label: 'RUL with uncertainty band' },
   { t: 165, label: 'Mission decision: continue / derate / RTB' },
+  { t: 120, label: 'Warm air mass — BOTH engines rise, differential does not' },
   { t: 200, label: 'CHT sensor 3 begins drifting — ENGINE IS HEALTHY' },
   { t: 235, label: 'Sensor fault correctly identified' },
   { t: 260, label: 'UNMODELLED fault — the twin says "I do not know"' },
@@ -103,6 +104,25 @@ const T_SENSOR_DRIFT_START = 200;
  * kept OUT of F, or the detector has nothing to detect.
  */
 const T_UNMODELLED_START = 258;
+
+/**
+ * COMMON-MODE DISTURBANCE — the whole point of the cross-engine channel.
+ *
+ * A warm air mass: ambient temperature rises, and it rises for BOTH engines
+ * because they are on the same aeroplane flying through the same air. Every
+ * absolute channel moves. The DIFFERENTIAL does not, because whatever is shared
+ * cancels exactly in the subtraction.
+ *
+ * Without something like this in the data, a cross-engine panel has nothing to
+ * prove. With it, the argument is visible in three seconds:
+ *   both engines drifting together is the environment.
+ *   one engine drifting alone is that engine.
+ */
+function commonModeOffsetK(t: number): number {
+  if (t < 120) return 0;
+  if (t < 155) return ((t - 120) / 35) * 22;   // ramp into warmer air
+  return 22;                                    // and stay there
+}
 const NULL_DIR = nullSpaceDirection(0);
 
 const FOULED_CYL = 1; // cylinder 2, 0-indexed
@@ -208,7 +228,7 @@ interface Physics {
 }
 
 function physicsAt(t: number, s: TrueState): Physics {
-  const atm = isa(CRUISE.altitude_ft);
+  const atm = isa(CRUISE.altitude_ft, commonModeOffsetK(t));
 
   // Turbo holds boost below critical altitude; degrade eta_c and boost falls.
   const boostRatio = 1.72 * s.eta_c_scale;
@@ -288,6 +308,52 @@ function physicsAt(t: number, s: TrueState): Physics {
 }
 
 // ---------------------------------------------------------------------------
+// ENGINE B — the free reference channel.
+//
+// A MALE UAV of this class is twin-engined: two nominally identical engines,
+// built to the same specification, drawing from the same tanks, flying the same
+// profile through the same air, for eighteen hours. That is the best controlled
+// experiment available in aviation and it costs nothing to use.
+//
+// B stays healthy for the whole mission, so every difference that survives the
+// subtraction belongs to A.
+// ---------------------------------------------------------------------------
+function makeEngineB(t: number, noise: (s: number) => number): SlowFrame {
+  const healthy = trueStateAt(0);
+  const phys = physicsAt(t, healthy);
+  return {
+    schema: 'pramana.slow.v1',
+    t,
+    engine_id: 'B',
+    seq: Math.round(t * 10),
+    rpm: CRUISE.rpm + noise(3),
+    map_hPa: phys.map_hPa + noise(2.0),
+    iat_K: phys.iat_K + noise(0.4),
+    // Small fixed build-to-build biases, because two real engines are never
+    // numerically identical. This is why the differential needs a baseline
+    // rather than being assumed to sit at exactly zero.
+    cht_C: phys.cht_C.map((v, i) => v + [0.6, -0.4, 0.3, -0.5][i] + noise(0.6)),
+    egt_C: phys.egt_C.map((v, i) => v + [2.1, -1.4, 0.8, -1.5][i] + noise(2.2)),
+    oil_press_bar: phys.oil_press_bar + 0.03 + noise(0.02),
+    oil_temp_C: phys.oil_temp_C - 0.8 + noise(0.3),
+    fuel_flow_kgps: phys.fuel_flow_total + noise(2e-6),
+    fuel_rail_bar: 1.68 + noise(0.01),
+    lambda: phys.lambda + noise(0.006),
+    turbo_rpm: phys.turbo_rpm + noise(220),
+    comp_out_p_hPa: phys.map_hPa * 1.045 + noise(2),
+    comp_out_T_K: phys.iat_K + 54 + noise(0.5),
+    inj_timing_deg: 12.4 + noise(0.05),
+    bus_voltage_V: 27.8 + noise(0.03),
+    alternator_A: 14.2 + noise(0.1),
+    throttle_pct: CRUISE.throttle_pct,
+    vib_rms_g: phys.egt_C.map(() => 0.42 + noise(0.01)),
+    altitude_ft: CRUISE.altitude_ft,
+    tas_mps: CRUISE.tas_mps,
+    oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t)).T,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Generate one tick
 // ---------------------------------------------------------------------------
 function makeTick(t: number, noise: (s: number) => number): MissionTick {
@@ -333,7 +399,7 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
     ),
     altitude_ft: CRUISE.altitude_ft,
     tas_mps: CRUISE.tas_mps,
-    oat_K: isa(CRUISE.altitude_ft).T,
+    oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t)).T,
   };
 
   const fast: FastFeatures = {
@@ -623,6 +689,7 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
 
   return {
     slow,
+    slowB: makeEngineB(t, noise),
     fast,
     health,
     predicted: {

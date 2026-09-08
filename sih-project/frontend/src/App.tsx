@@ -4,6 +4,7 @@ import {
   ResidualHeatmap, RulPanel, TwinConfidencePanel, VirtualSensorPanel,
 } from './components/Panels';
 import { ChtChart, EgtChart } from './components/StripChart';
+import { CrossEnginePanel } from './components/CrossEngine';
 import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
@@ -88,6 +89,7 @@ export default function App() {
           <LimitsPanel />
           <DiagnosisPanel />
           <TwinConfidencePanel />
+          <CrossEnginePanel />
           <RulPanel />
         </div>
 

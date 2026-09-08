@@ -514,3 +514,65 @@ body {
   font-family: var(--mono); font-size: 8.5px; color: var(--text-dimr);
 }
 .alt-crit { color: var(--warn); }
+
+/* ---------------- cross-engine differential ---------------- */
+.cross-verdict {
+  padding: 8px 10px; font-size: 11px; line-height: 1.55;
+  border-left: 2px solid var(--line-2); background: var(--panel-2);
+  color: var(--text-dim); margin-bottom: 10px;
+}
+.cross-verdict strong { display: block; margin-bottom: 3px; color: var(--text); }
+.cross-verdict strong + strong { display: inline; margin: 0; }
+.cross-ok { border-left-color: var(--ok); }
+.cross-env { border-left-color: var(--sensor); background: #08131a; }
+.cross-env strong:first-child { color: var(--sensor); }
+.cross-eng { border-left-color: var(--alert); background: #150a0e; }
+.cross-eng strong:first-child { color: var(--alert); }
+
+.cross-table { display: flex; flex-direction: column; gap: 1px; }
+.cross-head, .cross-row {
+  display: grid; grid-template-columns: 84px 46px 46px 1fr;
+  gap: 6px; align-items: center;
+}
+.cross-head {
+  font-family: var(--mono); font-size: 8.5px; color: var(--text-dimr);
+  letter-spacing: 0.08em; padding-bottom: 3px;
+  border-bottom: 1px solid var(--line); margin-bottom: 3px;
+}
+.cross-head span { text-align: right; }
+.cross-head span:first-child { text-align: left; }
+.cross-row { padding: 2px 0; }
+.cross-row-hit { background: rgba(244, 63, 94, 0.07); border-radius: 2px; }
+.cross-label { font-size: 10px; color: var(--text-dim); }
+.cross-num {
+  font-family: var(--mono); font-size: 10px; text-align: right; color: var(--text);
+}
+.cross-b { color: var(--text-dim); }
+.cross-delta {
+  display: grid; grid-template-columns: 1fr 52px; gap: 5px;
+  align-items: center; height: 14px;
+}
+.cross-track { position: relative; height: 14px; }
+.cross-bar { position: absolute; top: 4px; height: 6px; border-radius: 1px; }
+.cross-dv {
+  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  text-align: right;
+}
+
+.cross-spark { margin-top: 11px; }
+.cross-spark-head {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: var(--text-dimr); margin-bottom: 3px;
+}
+.cross-spark-tol { font-family: var(--mono); }
+.cross-svg {
+  width: 100%; height: 40px; display: block;
+  background: var(--void); border: 1px solid var(--line); border-radius: 2px;
+}
+.cross-stmt + .cross-stmt {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.cross-stmt strong { display: block; margin-bottom: 3px; color: var(--text); }
+.cross-stmt em { color: var(--text-dim); font-style: italic; }
+.cross-env .cross-stmt:first-child strong { color: var(--sensor); }
+.cross-eng .cross-stmt:last-child strong { color: var(--alert); }
