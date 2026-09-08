@@ -4,6 +4,7 @@ import {
   ResidualHeatmap, RulPanel, TwinConfidencePanel, VirtualSensorPanel,
 } from './components/Panels';
 import { ChtChart, EgtChart } from './components/StripChart';
+import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
 import { useCurrentTick, useMission } from './state/missionStore';
@@ -106,6 +107,7 @@ export default function App() {
 
         <div className="col col-right">
           <MissionPanel />
+          <MissionMap />
           <ResidualHeatmap />
           <HealthParamsPanel />
           <VirtualSensorPanel />

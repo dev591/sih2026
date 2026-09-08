@@ -478,3 +478,39 @@ body {
 .conf-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 1px; vertical-align: -1px; }
 .sw-explained { background: var(--ok); }
 .sw-unexplained { background: var(--alert); }
+
+/* ---------------- mission risk map ---------------- */
+.mapsvg {
+  width: 100%; height: auto; display: block;
+  border: 1px solid var(--line); border-radius: 2px; background: var(--void);
+}
+.maplabel {
+  font-family: var(--mono); font-size: 7px; fill: var(--text-dimr);
+  letter-spacing: 0.08em;
+}
+.maplabel-pnr { fill: #e879f9; }
+
+.alt-control { margin-top: 11px; }
+.alt-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 10px; color: var(--text-dimr);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.alt-value { font-family: var(--mono); font-size: 14px; color: var(--text); }
+.alt-value em { font-style: normal; font-size: 9.5px; color: var(--text-dimr); margin-left: 3px; }
+.alt-changed { color: var(--accent); }
+.alt-slider {
+  width: 100%; appearance: none; height: 4px; border-radius: 2px;
+  margin: 8px 0 4px; outline: none; cursor: grab;
+  background: linear-gradient(90deg, #1e3a5f 0%, #1e3a5f 15%, #3f2d16 15%, #3f2d16 100%);
+}
+.alt-slider::-webkit-slider-thumb {
+  appearance: none; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel); cursor: grab;
+}
+.alt-slider:active::-webkit-slider-thumb { cursor: grabbing; }
+.alt-scale {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 8.5px; color: var(--text-dimr);
+}
+.alt-crit { color: var(--warn); }
