@@ -1,0 +1,166 @@
+# PRAMANA — engine profile: VRDE 180 hp aero-diesel (PRIMARY)
+#
+# DRDO / Vehicles Research and Development Establishment powerplant for UAVs.
+# Chosen as primary because twinning DRDO's own engine, in front of DRDO,
+# using their own published altitude-trial numbers as environment presets,
+# is the cheapest credibility available to this project.
+#
+# PROVENANCE MARKERS on every block:
+#   published  — quoted from DRDO / open sources, citable in the pitch
+#   derived    — computed from published figures
+#   assumed    — engineering estimate; MUST be labelled as such if quoted on a slide
+#
+# A second engine is a config file, not a rewrite. See engine_rotax_914.yaml.
+
+profile:
+  id: vrde_180
+  name: "VRDE 180 hp Aero-Diesel"
+  developer: "Vehicles Research and Development Establishment, DRDO"
+  cycle: diesel            # compression ignition
+  aspiration: turbocharged
+  control: fadec           # indigenously developed FADEC
+  provenance: published
+  notes: >
+    Holds 180 hp constant to 11 000 ft. 1100+ hours accumulated on test
+    profiles. High-altitude trials at Leh and Changla to 17 664 ft.
+    TAPAS BH-201 production spec calls for two engines at 220 hp each
+    (against 100 hp prototype units).
+
+# ---------------------------------------------------------------------------
+# GEOMETRY — drives the mean-value model state equations (§4 of the design doc)
+# ---------------------------------------------------------------------------
+geometry:
+  cylinders: 4
+  provenance: assumed      # displacement/bore/stroke not published; sized to 180 hp
+  displacement_m3: 2.0e-3  # V_d, swept volume [m^3]
+  bore_m: 0.086            # B — enters the Woschni correlation directly
+  stroke_m: 0.086
+  compression_ratio: 17.5
+  connecting_rod_m: 0.150
+  strokes_per_cycle: 4     # the 120 in the speed-density relation is 2 rev x 60 s
+
+# ---------------------------------------------------------------------------
+# RATINGS
+# ---------------------------------------------------------------------------
+ratings:
+  provenance: published
+  rated_power_kW: 134.2          # 180 hp
+  rated_power_hp: 180
+  critical_altitude_ft: 11000    # above this the turbo cannot hold rated MAP
+  critical_altitude_m: 3352.8
+  rated_speed_rpm: 3800          # provenance: assumed
+  max_continuous_rpm: 3600       # provenance: assumed
+  idle_rpm: 900                  # provenance: assumed
+
+# ---------------------------------------------------------------------------
+# LIMITS — these are the redlines the twin is beating. Fixed-threshold systems
+# alarm here; PRAMANA alarms on residual departure well before.
+# ---------------------------------------------------------------------------
+limits:
+  provenance: assumed            # no public TCDS for this engine; see Rotax profile
+  cht_C: 200.0                   # cylinder head temperature
+  coolant_C: 110.0
+  oil_temp_C: 130.0
+  oil_pressure_bar:
+    min_above_2500rpm: 2.0
+    min_below_2500rpm: 0.8
+    max_cold_start: 7.0
+  manifold_pressure_hPa:
+    takeoff: 2200
+    max_continuous: 1900
+  egt_C: null                    # deliberately null — EGT is a TREND parameter here,
+                                 # not a limit parameter. This is the argument for a twin.
+
+# ---------------------------------------------------------------------------
+# FUEL
+# ---------------------------------------------------------------------------
+fuel:
+  type: jet_a1                   # aero-diesel runs heavy fuel
+  Q_LHV_J_per_kg: 43.0e6         # lower heating value
+  AFR_stoich: 14.5
+  provenance: published
+
+# ---------------------------------------------------------------------------
+# MVEM PARAMETERS — the health parameters theta live here as nominal values.
+# The UKF estimates SCALE FACTORS on these; the scale factors ARE the health
+# indicators reported to the operator, in physical units.
+# ---------------------------------------------------------------------------
+mvem:
+  intake_manifold_volume_m3: 4.0e-3      # V_im, filling-and-emptying
+  R_air_J_per_kgK: 287.05
+  gamma_air: 1.40
+  cp_air_J_per_kgK: 1005.0
+  cp_exhaust_J_per_kgK: 1150.0
+
+  volumetric_efficiency:                  # eta_v(p_im, N) — ring wear and valve
+    nominal: 0.88                         # recession enter the model HERE
+    map: lookup_eta_v.csv                 # provenance: assumed
+    scale_nominal: 1.0                    # eta_v_sc — UKF state
+
+  compressor:
+    efficiency_nominal: 0.72              # eta_c — degrades above critical altitude
+    scale_nominal: 1.0                    # eta_c_sc — UKF state
+    map: compressor_map.csv               # corrected flow vs pressure ratio
+    inertia_kgm2: 2.0e-5                  # J_tc
+    mech_efficiency: 0.98                 # eta_m
+
+  crankshaft:
+    inertia_kgm2: 0.35                    # J
+    friction_coeff_nominal: 1.0           # f_fric — UKF state; bearing wear channel
+
+  thermal:
+    head_mass_kg: 3.2                     # per cylinder, lumped
+    head_cp_J_per_kgK: 900.0              # aluminium
+    fin_area_m2: 0.28                     # A_fin
+    hA_scale_nominal: 1.0                 # (hA)_sc — UKF state; cooling degradation
+    coolant_temp_K: 363.15
+
+  injector:
+    discharge_coeff_nominal: 1.0          # C_d,inj per cylinder — UKF state (x4)
+    n_injectors: 4
+
+# ---------------------------------------------------------------------------
+# PROPELLER — the only route to shaft power without a torque sensor.
+# A propeller is a calibrated dynamometer: P = C_P(J) * rho * n^3 * D^5
+# ---------------------------------------------------------------------------
+propeller:
+  provenance: assumed
+  diameter_m: 1.65               # D
+  blades: 3
+  cp_map: prop_cp_map.csv        # C_P as a function of advance ratio J = V/(nD)
+  gear_ratio: 1.0                # direct drive
+
+# ---------------------------------------------------------------------------
+# PARITY PATH AVAILABILITY — which of the four air-mass-flow estimates this
+# installation can actually produce. The framework degrades gracefully:
+# with n paths you get n-1 independent residuals, and the isolability analysis
+# is recomputed for whichever sensor set the engine carries.
+# ---------------------------------------------------------------------------
+parity_paths:
+  speed_density: true            # Path 1 — MAP, IAT, crank speed
+  compressor_map: true           # Path 2 — turbo speed, pressure ratio
+  fuel_lambda: true              # Path 3 — injector command, UEGO
+  intake_restriction: false      # Path 4 — UNAVAILABLE: a FADEC aero-diesel is
+                                 # unthrottled. Requires a hot-film MAF or venturi.
+                                 # State this honestly rather than faking rho_3.
+  independent_residuals: 2       # n-1, with n=3 available paths
+
+# ---------------------------------------------------------------------------
+# ENVIRONMENT PRESETS — DRDO's own trial numbers, used as scenario definitions
+# ---------------------------------------------------------------------------
+environment_presets:
+  sea_level_isa:
+    altitude_ft: 0
+    isa_offset_K: 0
+  cruise_18k:
+    altitude_ft: 18000
+    isa_offset_K: 0
+    note: "nominal demo cruise point"
+  leh_hot_high:
+    altitude_ft: 17664           # published: Changla trial ceiling
+    isa_offset_K: 20             # ISA+20
+    note: "DRDO Leh / Changla high-altitude trial condition"
+  ceiling_28k:
+    altitude_ft: 28000
+    isa_offset_K: 0
+    note: "TAPAS BH-201 demonstrated ceiling; far above critical altitude"
