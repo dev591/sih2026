@@ -427,3 +427,74 @@ export function VirtualSensorPanel() {
     </Panel>
   );
 }
+
+// ---------------------------------------------------------------------------
+// TWIN CONFIDENCE — the channel that lets the system say "I don't know".
+//
+// Every classifier is forced to pick from its list. This one reports how much
+// of the live residual its fault library can actually account for, and when
+// that fraction collapses it declines to name a fault at all.
+//
+// See docs/spec/novelty-detection.md.
+// ---------------------------------------------------------------------------
+export function TwinConfidencePanel() {
+  const { novelty, twin_confidence } = useCurrentTick().health;
+
+  // Degrade gracefully: if the backend has not published these yet, show
+  // nothing rather than a wrong number.
+  if (!novelty || !twin_confidence) return null;
+
+  const conf = twin_confidence.value;
+  const flag = novelty.exceeded ? 'alert' : conf < 0.75 ? 'warn' : 'ok';
+
+  return (
+    <Panel
+      title="Twin confidence"
+      subtitle={`ν = ${novelty.index.toFixed(2)} · null-space dim ${novelty.null_space_dim}`}
+      flag={flag}
+    >
+      <div className="conf-big">
+        <span className={`tone-${flag}`}>{(conf * 100).toFixed(0)}</span>
+        <span className="conf-unit">%</span>
+      </div>
+
+      <div className="conf-split">
+        <div className="conf-track">
+          <span className="conf-explained" style={{ width: `${(1 - novelty.index) * 100}%` }} />
+          <span className="conf-unexplained" style={{ width: `${novelty.index * 100}%` }} />
+        </div>
+        <div className="conf-legend">
+          <span><i className="sw-explained" /> explained by fault library</span>
+          <span><i className="sw-unexplained" /> unexplained</span>
+        </div>
+      </div>
+
+      {novelty.exceeded && (
+        <div className="callout callout-alert">
+          <strong>Excitation pattern is not in the fault library.</strong>
+          {(novelty.index * 100).toFixed(0)}% of this residual is orthogonal to
+          every fault direction we modelled. This is either an unmodelled failure
+          mode or a twin that has drifted from the engine — so the system
+          declines to name a fault rather than confidently naming the wrong one.
+          <strong style={{ marginTop: 6 }}>Recommend human inspection.</strong>
+        </div>
+      )}
+
+      <div className="metric-grid">
+        <Metric label="‖ρ‖" value={novelty.residual_norm.toFixed(2)} unit="σ" />
+        <Metric label="‖ρ⊥‖" value={novelty.unexplained_norm.toFixed(2)} unit="σ"
+          tone={novelty.exceeded ? 'alert' : 'dim'} />
+        <Metric label="rank F" value={`${novelty.effective_rank}/11`} tone="dim" />
+      </div>
+
+      <p className="note">
+        The fault signatures span {novelty.effective_rank} of 11 residual
+        dimensions, leaving {novelty.null_space_dim} in which a fault we have
+        never modelled can still be seen. ν is weighted by residual
+        significance — below the noise floor there is nothing to explain, so
+        confidence is full. A tool that never says
+        <strong> "I don't know"</strong> cannot be trusted when it does answer.
+      </p>
+    </Panel>
+  );
+}

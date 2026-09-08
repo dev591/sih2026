@@ -125,6 +125,7 @@ export interface AnomalyState {
 
 export type FaultId =
   | 'healthy'
+  | 'unknown'
   | 'injector_fouling'
   | 'ignition_misfire'
   | 'ring_wear'
@@ -195,6 +196,27 @@ export interface MissionDecision {
 
 export type LimitsState = 'green' | 'caution' | 'exceeded';
 
+/** Novelty detection — see docs/spec/novelty-detection.md.
+ *  OPTIONAL: the GCS hides the confidence channel rather than showing a wrong
+ *  number when the backend does not publish it yet. */
+export interface NoveltyState {
+  index: number;              // nu = ||rho_perp|| / ||rho||, in [0,1]
+  residual_norm: number;
+  unexplained_norm: number;
+  threshold: number;          // 99.5th pct of nu on held-out healthy data
+  exceeded: boolean;
+  effective_rank: number;     // rank(F). If null_space_dim is 0 the claim dies.
+  null_space_dim: number;
+  /** Per-residual unexplained component, for the explain drawer. */
+  unexplained?: number[];
+}
+
+export interface TwinConfidence {
+  value: number;              // 1 - nu, clipped
+  basis: string;
+  note: string;
+}
+
 export interface HealthFrame {
   schema: 'pramana.health.v1';
   t: number;
@@ -206,6 +228,8 @@ export interface HealthFrame {
   diagnosis: Diagnosis;
   rul: RulEstimate;
   mission: MissionDecision;
+  novelty?: NoveltyState;
+  twin_confidence?: TwinConfidence;
   /** What a THRESHOLD system would be showing right now. Keep it on screen:
    *  the contrast is the whole argument. */
   limits_state: LimitsState;
@@ -265,6 +289,7 @@ export function residualRow(rho: ResidualVector): (number | null)[] {
 
 export const FAULT_LABELS: Record<FaultId, string> = {
   healthy: 'Healthy',
+  unknown: 'Unrecognised excitation',
   injector_fouling: 'Injector fouling',
   ignition_misfire: 'Ignition misfire',
   ring_wear: 'Piston ring wear / blow-by',

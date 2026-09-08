@@ -460,3 +460,21 @@ body {
 .src-live .src-dot { box-shadow: 0 0 7px var(--ok); }
 .src-simulated { color: var(--warn); border-color: #4a3714; background: #14100a; }
 .src-connecting { color: var(--text-dimr); }
+
+/* ---------------- twin confidence ---------------- */
+.conf-big { font-family: var(--mono); font-size: 30px; line-height: 1; }
+.conf-unit { font-size: 14px; color: var(--text-dimr); margin-left: 2px; }
+.conf-split { margin-top: 11px; }
+.conf-track {
+  display: flex; height: 7px; border-radius: 3px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--void);
+}
+.conf-explained { background: linear-gradient(90deg, #1c6b52, var(--ok)); }
+.conf-unexplained { background: repeating-linear-gradient(45deg, var(--alert) 0 4px, #7f1d2c 4px 8px); }
+.conf-legend {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font-size: 9px; color: var(--text-dimr);
+}
+.conf-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 1px; vertical-align: -1px; }
+.sw-explained { background: var(--ok); }
+.sw-unexplained { background: var(--alert); }

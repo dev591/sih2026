@@ -22,6 +22,7 @@
  * a demo.
  */
 
+import { computeNovelty, nullSpaceDirection } from '../analysis/novelty';
 import {
   N_CYL,
   type FaultId,
@@ -85,10 +86,24 @@ export const SCRIPT_BEATS = [
   { t: 165, label: 'Mission decision: continue / derate / RTB' },
   { t: 200, label: 'CHT sensor 3 begins drifting — ENGINE IS HEALTHY' },
   { t: 235, label: 'Sensor fault correctly identified' },
+  { t: 260, label: 'UNMODELLED fault — the twin says "I do not know"' },
 ] as const;
 
 const T_INJECTOR_START = 40;
 const T_SENSOR_DRIFT_START = 200;
+
+/**
+ * An exhaust valve leak on cylinder 4 — REAL physics, DELIBERATELY LEFT OUT of
+ * the ten-fault library, so the novelty detector has something honest to catch.
+ *
+ * We inject it along a direction in the null space of the fault signature
+ * matrix, which is exactly what "a fault the library cannot express" means.
+ * BE-1's version should model the leak physically (blow-down loss through a
+ * leaking seat) rather than adding a residual vector — but it must still be
+ * kept OUT of F, or the detector has nothing to detect.
+ */
+const T_UNMODELLED_START = 258;
+const NULL_DIR = nullSpaceDirection(0);
 
 const FOULED_CYL = 1; // cylinder 2, 0-indexed
 const DRIFT_CYL = 2;  // cylinder 3, 0-indexed
@@ -381,7 +396,37 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
     ((phys.oil_press_bar - predicted.oil_press_bar) / predicted.oil_press_bar) * 40 +
     noise(0.25);
 
-  const rho11 = (phys.ripple - 0.004) / 0.0125 + noise(0.22);
+  let rho11 = (phys.ripple - 0.004) / 0.0125 + noise(0.22);
+
+  // ---- unmodelled fault: excitation the library provably cannot explain ----
+  const unmodelled = t >= T_UNMODELLED_START ? (t - T_UNMODELLED_START) * 0.62 : 0;
+  const rhoVec = [rho1, rho2, null, rho4, rho5, ...rho6_9, rho10, rho11];
+  if (unmodelled > 0) {
+    for (let i = 0; i < rhoVec.length; i++) {
+      if (rhoVec[i] !== null) rhoVec[i] = (rhoVec[i] as number) + NULL_DIR[i] * unmodelled;
+    }
+    rho11 = rhoVec[10] as number;
+  }
+  const nov = computeNovelty(rhoVec);
+  const novThreshold = 0.42;
+
+  // SIGNIFICANCE WEIGHTING — nu alone is not interpretable.
+  //
+  // At rest the residual is pure noise, and isotropic noise puts sqrt(3/11)
+  // ~= 0.52 of itself in the null space BY CONSTRUCTION. So a healthy engine
+  // shows a high nu with nothing wrong, and an unweighted confidence channel
+  // would sit at ~50% permanently — worse than useless, because it would be
+  // ignored exactly when it mattered.
+  //
+  // nu only carries information once there is a residual worth explaining.
+  // Below the noise floor there is nothing to explain, so confidence is full.
+  const RHO_NOISE_FLOOR = 2.0;   // sigma units; calibrate on healthy data
+  const RHO_FULL_WEIGHT = 4.5;
+  const significance = Math.min(
+    1,
+    Math.max(0, (nov.residualNorm - RHO_NOISE_FLOOR) / (RHO_FULL_WEIGHT - RHO_NOISE_FLOOR))
+  );
+  const novExceeded = nov.index > novThreshold && significance > 0.5;
 
   // ------------------------------------------------------------------
   // Diagnosis
@@ -450,6 +495,22 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
     };
   }
 
+  // A high novelty index does not erase what we already identified — it says
+  // there is something ELSE as well. Report both: the known fault keeps its
+  // confidence, and the unexplained component is surfaced above it rather than
+  // silently replacing it.
+  if (novExceeded) {
+    diagnosis = {
+      top: [
+        { fault: 'unknown', cylinder: null, p: nov.index, source: 'matrix' },
+        ...diagnosis.top.filter((h) => h.fault !== 'healthy'),
+      ],
+      is_sensor_fault: false,
+      ambiguous: true,
+      probe: null,
+    };
+  }
+
   // ------------------------------------------------------------------
   // RUL — two heads, always both, advise on the conservative one.
   // ------------------------------------------------------------------
@@ -491,16 +552,33 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
     t,
     engine_id: 'A',
     rho: {
-      rho1_sd_vs_comp: rho1,
-      rho2_sd_vs_lambda: rho2,
+      rho1_sd_vs_comp: rhoVec[0] as number,
+      rho2_sd_vs_lambda: rhoVec[1] as number,
       // Path 4 does not exist on an unthrottled FADEC aero-diesel.
       // null, never a fabricated number.
       rho3_sd_vs_restr: null,
-      rho4_energy: rho4,
-      rho5_power: rho5,
-      rho6_9_cyl_dev: rho6_9,
-      rho10_oil: rho10,
-      rho11_ripple: rho11,
+      rho4_energy: rhoVec[3] as number,
+      rho5_power: rhoVec[4] as number,
+      rho6_9_cyl_dev: rhoVec.slice(5, 9) as number[],
+      rho10_oil: rhoVec[9] as number,
+      rho11_ripple: rhoVec[10] as number,
+    },
+    novelty: {
+      index: nov.index,
+      residual_norm: nov.residualNorm,
+      unexplained_norm: nov.unexplainedNorm,
+      threshold: novThreshold,
+      exceeded: novExceeded,
+      effective_rank: nov.effectiveRank,
+      null_space_dim: nov.nullSpaceDim,
+      unexplained: nov.unexplained,
+    },
+    twin_confidence: {
+      value: Math.max(0, Math.min(1, 1 - nov.index * significance)),
+      basis: 'residual_projection',
+      note: novExceeded
+        ? 'excitation pattern is not in the fault library'
+        : 'residual is well explained by known fault directions',
     },
     theta: {
       eta_v_scale: { value: 1.0 + noise(0.004), sigma: 0.011 },

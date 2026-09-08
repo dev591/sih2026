@@ -1,7 +1,7 @@
 import { Engine3D } from './components/Engine3D';
 import {
   DiagnosisPanel, HealthParamsPanel, LimitsPanel, MissionPanel,
-  ResidualHeatmap, RulPanel, VirtualSensorPanel,
+  ResidualHeatmap, RulPanel, TwinConfidencePanel, VirtualSensorPanel,
 } from './components/Panels';
 import { ChtChart, EgtChart } from './components/StripChart';
 import { BeatBar, Scrubber } from './components/Scrubber';
@@ -86,6 +86,7 @@ export default function App() {
         <div className="col col-left">
           <LimitsPanel />
           <DiagnosisPanel />
+          <TwinConfidencePanel />
           <RulPanel />
         </div>
 
