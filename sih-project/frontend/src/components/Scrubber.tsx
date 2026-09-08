@@ -8,7 +8,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useMission, MISSION_DURATION_S } from '../state/missionStore';
-import { SCRIPT_BEATS } from '../mock/missionGenerator';
+import { SCRIPT_BEATS, SCRIPTED } from '../mock/missionGenerator';
 
 export function Scrubber() {
   const index = useMission((s) => s.index);
@@ -113,6 +113,7 @@ export function Scrubber() {
 export function BeatBar() {
   const setIndex = useMission((s) => s.setIndex);
   const index = useMission((s) => s.index);
+  const onScript = useMission((s) => s.config === SCRIPTED);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -127,6 +128,21 @@ export function BeatBar() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [setIndex]);
+
+  // The beats describe the rehearsed mission. In the sandbox they refer to
+  // events that are not in the timeline, so showing them would be a lie.
+  if (!onScript) {
+    return (
+      <div className="beat-bar beat-bar-sandbox">
+        <span className="sandbox-tag">SANDBOX</span>
+        <span className="sandbox-note">
+          Running an injected configuration — the scripted beats do not apply.
+          Use <strong>Demo script</strong> in the fault console to return to the
+          rehearsed mission.
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="beat-bar">

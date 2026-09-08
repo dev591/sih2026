@@ -9,7 +9,10 @@
 import { create } from 'zustand';
 import {
   generateMission,
+  generateFrom,
+  SCRIPTED,
   MISSION_DURATION_S,
+  type FaultConfig,
 } from '../mock/missionGenerator';
 import { feed, type FeedSource } from '../net/feed';
 import type { MissionTick } from '../types/telemetry';
@@ -32,6 +35,12 @@ interface MissionState {
   source: FeedSource;
   feedError: string | null;
   liveFrames: number;
+  /** What is currently injected. The console edits this; the scripted demo
+   *  uses SCRIPTED. Both run identical physics. */
+  config: FaultConfig;
+  /** True while a fault has been injected but not yet revealed on screen —
+   *  so a judge can choose one without the presenter seeing which. */
+  blind: boolean;
 
   tick: () => MissionTick;
   setIndex: (i: number) => void;
@@ -45,6 +54,9 @@ interface MissionState {
   setExplainOpen: (open: boolean) => void;
   /** Append one frame arriving from BE-1's socket. */
   pushLive: (tick: MissionTick) => void;
+  /** Replace the fault configuration and regenerate the mission. */
+  applyConfig: (cfg: FaultConfig, opts?: { seekTo?: number; blind?: boolean }) => void;
+  reveal: () => void;
   setFeed: (source: FeedSource, error: string | null, frames: number) => void;
   /** Jump straight to a scripted beat — used by the demo shortcut bar. */
   seekTo: (t: number) => void;
@@ -60,6 +72,8 @@ export const useMission = create<MissionState>((set, get) => ({
   source: 'connecting',
   feedError: null,
   liveFrames: 0,
+  config: SCRIPTED,
+  blind: false,
 
   tick: () => {
     const { ticks, index } = get();
@@ -86,6 +100,21 @@ export const useMission = create<MissionState>((set, get) => ({
   selectCylinder: (i) => set({ selectedCylinder: i, explainOpen: i !== null }),
   setExplainOpen: (explainOpen) => set({ explainOpen }),
   seekTo: (t) => set({ index: Math.max(0, Math.min(t, MISSION_DURATION_S)) }),
+
+  applyConfig: (cfg, opts) => {
+    const ticks = generateFrom(cfg);
+    set({
+      ticks,
+      config: cfg,
+      blind: opts?.blind ?? false,
+      index: Math.max(0, Math.min(opts?.seekTo ?? 0, ticks.length - 1)),
+      playing: true,
+      selectedCylinder: null,
+      explainOpen: false,
+    });
+  },
+
+  reveal: () => set({ blind: false }),
 
   pushLive: (tick) =>
     set((s) => {

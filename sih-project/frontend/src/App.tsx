@@ -5,6 +5,7 @@ import {
 } from './components/Panels';
 import { ChtChart, EgtChart } from './components/StripChart';
 import { CrossEnginePanel } from './components/CrossEngine';
+import { FaultConsole, InjectedTruth } from './components/FaultConsole';
 import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
@@ -82,10 +83,12 @@ export default function App() {
       </header>
 
       <StatusBar />
+      <InjectedTruth />
       <BeatBar />
 
       <main className="grid">
         <div className="col col-left">
+          <FaultConsole />
           <LimitsPanel />
           <DiagnosisPanel />
           <TwinConfidencePanel />

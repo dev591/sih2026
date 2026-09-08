@@ -86,29 +86,71 @@ of unexplainable residual.
 
 ### Measured result (frontend reference implementation, 2026-09-08)
 
+**Corrected after a bug found by injecting an in-library fault and watching the
+detector reject it.** Both numbers are recorded because the difference is the
+lesson.
+
 ```
-tol = 0.01 / 0.05 / 0.10   ->   rank = 8,  null-space dim = 3   (identical at all three)
-
-exactly collinear with the first 8 (residual norm 0.000 after orthogonalisation):
-  detonation, map_sensor_drift, egt_sensor_drift, cht_sensor_drift, lambda_sensor_drift
+                                   columns   rank   null-space dim
+block thermal (WRONG)                 13       8          3
+per-cylinder expansion (CORRECT)      31      10          1
 ```
 
-The rank is stable across an order of magnitude of tolerance, so it is a real
-structural property and not a threshold artefact. Note also *which* signatures
-turned out to be exactly dependent — they are the same ones the isolability
-analysis in `residual-spec.md` §4 already flagged as weakly or non-isolable
-from steady-state parity. **The two analyses corroborate each other**, which is
-worth one sentence on the slide.
+Stable at tolerances 0.01 / 0.05 / 0.10 in both cases.
 
-> **CAVEAT BE-2 MUST HANDLE.** The number above comes from the *coarse* incidence
-> matrix, whose entries are glyph-level (0, ±1, ±2). That quantisation is what
-> makes five signatures come out exactly collinear. The physically correct object
-> is the **sensitivity matrix** — the Jacobian of each residual with respect to
-> each fault parameter, evaluated at the operating point — whose entries are
-> continuous. Recompute the rank on that, with the SVD, and report *those*
-> singular values. The rank will likely be higher and the null space smaller.
-> If it collapses to zero, we drop the claim and say why. Do not put the coarse
-> number on a slide as if it came from the physics.
+#### The bug: rho6..rho9 is not one direction
+
+The incidence matrix lists rho6..rho9 as a group, which is right for a printed
+table and **wrong as a direction in residual space.** A single-cylinder fault
+does not lift all four thermal deviations equally — it lifts **its own** and
+pushes the other three slightly negative, because each is measured against the
+**conditional mean across cylinders**. Sum-to-zero is a property of how the
+residual is defined, not an accident.
+
+Treated as a block, a genuine in-library single-cylinder fault does not lie in
+span(F) at all. Measured on synthetic residuals:
+
+```
+                                        nu BEFORE    nu AFTER
+EGT sensor drift, cyl 4  (in library)     0.932       0.000
+Injector fouling, cyl 2  (in library)     0.610       0.000
+Unmodelled fault (null space)             0.000       1.000
+```
+
+**The detector was crying wolf on two thirds of its own library while scoring
+the genuinely unknown fault at zero — exactly backwards.** The detector was
+right and the matrix was wrong: it was faithfully reporting that the observed
+pattern did not match what it had been told to expect.
+
+**Fix:** expand any fault whose per-cylinder block is excited into one column
+per cylinder, with the thermal part shaped as `(e_i − mean)`.
+
+#### What this does to the claim
+
+The null space shrinks from 3 dimensions to **1**. The claim survives — there
+is still a direction in which an unmodelled fault is visible — but it is now a
+**much narrower** claim, and it must be stated that way. One dimension out of
+eleven is not a comfortable margin.
+
+> **Say it honestly:** *"After correcting the per-cylinder structure, the fault
+> signatures span ten of eleven residual dimensions. One dimension remains in
+> which a fault we have never modelled is still detectable. That is a narrow
+> margin, and it shrinks further as the library grows — which is itself a
+> useful thing to know about the method."*
+
+That last clause is worth saying out loud: **the better your fault library, the
+less room there is for this detector to work.** It is a genuine limitation of
+the approach, not of our implementation, and volunteering it is exactly the
+trade that makes the rest of the deck credible.
+
+> **BE-2 — THE CAVEAT STILL STANDS, AND IT MATTERS MORE NOW.** Everything above
+> comes from the *coarse* incidence matrix (entries 0, ±1, ±2). The physically
+> correct object is the **sensitivity matrix** — the Jacobian of each residual
+> with respect to each fault parameter at the operating point — with continuous
+> entries. Recompute the rank there, with the SVD, and report the singular
+> values. Given that the correction above already took the null space from 3 to
+> 1, **there is a real chance it goes to 0 on the continuous matrix, and then we
+> drop the claim and say why.** Check before anyone builds a slide on it.
 
 ### SIGNIFICANCE WEIGHTING — do not skip this
 
@@ -152,8 +194,8 @@ Two new fields in `pramana.health.v1`, alongside `anomaly`:
     "unexplained_norm": 0.67,  // ||rho_perp||, sigma units
     "threshold": 0.42,         // 99.5th pct of nu on held-out healthy data
     "exceeded": false,         // index > threshold AND residual_norm significant
-    "effective_rank": 7,       // rank(F) at the stated tolerance
-    "null_space_dim": 4        // 11 - effective_rank
+    "effective_rank": 10,      // rank(F) at the stated tolerance
+    "null_space_dim": 1        // 11 - effective_rank; if this is 0, drop the claim
   },
   "twin_confidence": {
     "value": 0.93,             // 1 - nu, clipped; how far the diagnosis is trusted

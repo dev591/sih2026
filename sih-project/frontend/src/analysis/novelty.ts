@@ -87,7 +87,52 @@ function orthonormalBasis(columns: number[][], tol: number): number[][] {
   return basis;
 }
 
-const FAULT_COLUMNS: number[][] = FAULT_ORDER.map((f) => INCIDENCE[f]!);
+/**
+ * PER-CYLINDER EXPANSION.
+ *
+ * The incidence matrix lists rho6..rho9 as one group, which is right for a
+ * printed table but WRONG as a direction in residual space. A single-cylinder
+ * fault does not lift all four thermal deviations equally — it lifts ITS OWN
+ * and pushes the other three slightly negative, because each is measured
+ * against the CONDITIONAL MEAN across cylinders. Sum-to-zero is a property of
+ * the residual definition, not an accident.
+ *
+ * Treating them as a block made a genuine, in-library, single-cylinder fault
+ * look unexplainable — the detector was right and the matrix was wrong.
+ *
+ * So any fault whose per-cylinder block is excited is expanded into one column
+ * per cylinder, with the thermal part shaped as (e_i - mean).
+ */
+const CYL_SLOTS = [5, 6, 7, 8]; // rho6..rho9 in display order
+const N_CYL_LOCAL = CYL_SLOTS.length;
+
+function expandColumns(): number[][] {
+  const out: number[][] = [];
+  for (const f of FAULT_ORDER) {
+    const col = INCIDENCE[f]!;
+    const thermal = CYL_SLOTS.map((i) => col[i]);
+    const excited = thermal.some((v) => v !== 0);
+
+    if (!excited) {
+      out.push([...col]);
+      continue;
+    }
+
+    const mag = thermal.reduce((a, b) => a + Math.abs(b), 0) / N_CYL_LOCAL;
+    for (let c = 0; c < N_CYL_LOCAL; c++) {
+      const v = [...col];
+      for (let k = 0; k < N_CYL_LOCAL; k++) {
+        // (e_c - mean), scaled by the tabulated magnitude and signed by it.
+        const sign = Math.sign(thermal[k] || thermal[c] || 1);
+        v[CYL_SLOTS[k]] = sign * mag * ((k === c ? 1 : 0) - 1 / N_CYL_LOCAL);
+      }
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+const FAULT_COLUMNS: number[][] = expandColumns();
 const BASIS = orthonormalBasis(FAULT_COLUMNS, RANK_TOL);
 
 export const EFFECTIVE_RANK = BASIS.length;
