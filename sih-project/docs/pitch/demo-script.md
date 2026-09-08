@@ -35,7 +35,7 @@ turning at scaled RPM, all four cylinders steel-grey.
 Leave the limits panel visible for the whole demo. **The contrast is the
 argument.**
 
-### 0:40 — Inject injector fouling on cylinder 2
+### 0:40 — Induce injector fouling on cylinder 2
 
 Slow ramp, `C_d ↓ 0.4 %/min`. **Every limit stays green.** The residual on EGT₂
 lifts within seconds; the anomaly score crosses at roughly t+22 s of simulated
