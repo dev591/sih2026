@@ -100,11 +100,33 @@ export function Scrubber() {
   );
 }
 
-/** Named jumps to each scripted beat. Rehearsed demos still go wrong; being
- *  able to get back to the right moment in one click is cheap insurance. */
+/**
+ * Named jumps to each scripted beat. Rehearsed demos still go wrong; being able
+ * to get back to the right moment in one action is cheap insurance.
+ *
+ * The bar WRAPS rather than scrolling horizontally. A scrolling bar moves the
+ * chips under the cursor, so the one you reach for is not the one you hit —
+ * which is fine in development and a real hazard on stage. Every beat is
+ * therefore visible at once, and each also has a number key, because under
+ * pressure a keystroke beats a small target.
+ */
 export function BeatBar() {
   const setIndex = useMission((s) => s.setIndex);
   const index = useMission((s) => s.index);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= SCRIPT_BEATS.length) {
+        e.preventDefault();
+        setIndex(SCRIPT_BEATS[n - 1].t);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setIndex]);
 
   return (
     <div className="beat-bar">
@@ -116,11 +138,15 @@ export function BeatBar() {
             key={b.t}
             className={`beat-chip${active ? ' beat-chip-on' : ''}`}
             onClick={() => setIndex(b.t)}
+            title={`Press ${i + 1} to jump here`}
           >
-            <span className="beat-time">
-              {Math.floor(b.t / 60)}:{(b.t % 60).toString().padStart(2, '0')}
+            <span className="beat-key">{i + 1}</span>
+            <span className="beat-body">
+              <span className="beat-time">
+                {Math.floor(b.t / 60)}:{(b.t % 60).toString().padStart(2, '0')}
+              </span>
+              <span className="beat-label">{b.label}</span>
             </span>
-            <span className="beat-label">{b.label}</span>
           </button>
         );
       })}

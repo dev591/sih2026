@@ -20,6 +20,29 @@ that three people can build simultaneously without waiting on each other.
 
 ---
 
+## Where we actually are (updated after the first build session)
+
+The frontend is **ahead of the schedule below**. The ground control station
+already exists and runs: interactive 3D engine, uPlot strip charts, residual
+heatmap, explain drawer, global replay scrubber, twin confidence, mission risk
+map with a draggable cruise altitude, and the cross-engine differential.
+
+**This does not mean the plan changed. It means BE-1 and BE-2 are now the
+critical path**, and the frontend is unblocked from both of you by design.
+
+Two things are already true and worth knowing before you start:
+
+1. **You are not blocked on each other.** The contracts at the end of this
+   document are live in the repo. The frontend builds against a locally
+   generated mission until BE-1's socket appears, then upgrades to live with no
+   reload and no code change.
+2. **One capability was added that is not in the original scope** —
+   see *Novelty detection* under BE-2. It is small, it is the strongest thing
+   we have for one specific judge question, and it needs BE-2 to port about
+   forty lines.
+
+---
+
 ## The one rule that beats every other rule
 
 > **Build the twelve-hour version first. Finish it by end of Day 2. Tag it.
@@ -266,12 +289,13 @@ and PX4 actually run, 1 Mbit/s typical).
 | `backend/parity/residuals.py` — ρ₁–ρ₁₁ | Day 2 |
 | `backend/estimation/ukf.py` — joint state–parameter | Day 3–4 |
 | `backend/transport/can_bridge.py` — vcan0 → MQTT | Day 5 |
+| **`ws://localhost:8000/ws/telemetry`** — publish `{slow, fast, health, predicted}` JSON | **Day 1–2** |
 | `data/healthy_flights/*.parquet` — the healthy training set | Day 2 |
 | `data/fault_runs/*.parquet` — labelled runs, all ten faults | Day 3 |
 
 ### Definition of done, per day
 
-- **Day 1** — the model runs, produces plausible numbers at a fixed operating point, and publishes over MQTT. Not accurate yet. *Running.*
+- **Day 1** — the model runs, produces plausible numbers at a fixed operating point, and publishes over MQTT. Not accurate yet. *Running.* **The moment you also open the WebSocket, the dashboard stops saying SIMULATED and starts saying LIVE — that is a good first-day win and it costs almost nothing.**
 - **Day 2** — thermal and turbo states in, six faults working, healthy dataset generated and handed to BE-2. **This is the Day-2 tag.**
 - **Day 3** — all ten faults, damage integrator with ground-truth RUL labels.
 - **Day 4** — mission forward-propagation, Monte Carlo over the degradation posterior.
@@ -403,6 +427,45 @@ innovation that is absorbed by an adjustment of θ. A transducer fault produces
 innovation on one channel that no physically admissible parameter change can
 explain.**
 
+### Novelty detection — NEW, and the strongest thing you own
+
+**This was not in the original scope. It is now yours, and it is small.**
+
+It answers the most dangerous question a DRDO panel can ask: *"you have ten
+faults in your library — what happens when the engine does something that isn't
+one of them?"* Every classifier is forced to pick from its list, so the usual
+answer is that it confidently names the closest wrong thing.
+
+Each fault signature is a **direction** in the 11-dimensional residual space.
+Stack them into `F`, then split the live residual:
+
+```
+rho_hat  = proj_span(F) rho     explained by known faults
+rho_perp = rho - rho_hat        UNEXPLAINED
+nu       = ||rho_perp|| / ||rho||
+```
+
+High `||rho||` with high `nu` means something real is happening that the fault
+library cannot express. The honest output is **low confidence**, not a
+confident wrong answer.
+
+**What you have to do:**
+
+1. **Port `frontend/src/analysis/novelty.ts`.** It is a working reference
+   implementation, about forty lines. Use the **SVD**, not normal equations —
+   `F` is ill-conditioned by construction.
+2. **Recompute the rank on the SENSITIVITY MATRIX, not the incidence matrix.**
+   The frontend measured rank 8 / null-space 3, but that is from the coarse
+   glyph matrix (entries 0, ±1, ±2). The physically correct object is the
+   Jacobian of each residual with respect to each fault parameter. Report the
+   singular values. **If the null space collapses to zero we drop the claim and
+   say why** — that is the honesty policy working as intended.
+3. **Weight nu by residual significance.** Unweighted it reads ~50% confidence
+   on a healthy engine, because isotropic noise puts sqrt(3/11) of itself in
+   the null space by construction. This already bit the frontend once.
+
+Full spec, including the schema fields: `docs/spec/novelty-detection.md`.
+
 ### The highest-value 90 minutes of your entire week
 
 **Run your residual → autoencoder → RUL stack, unmodified, on NASA's C-MAPSS
@@ -443,6 +506,7 @@ result. Do it on Day 4.
 | `ml/m2_autoencoder/` — model, weights, calibrated threshold | Day 2 |
 | `ml/m3_classifier/` — model + confusion matrix | Day 3 |
 | `ml/m3_rul/` — both heads, p10/p50/p90 | Day 3 |
+| `ml/novelty/` — ported projection + **SVD rank report on the sensitivity matrix** | Day 3 |
 | `ml/eval/metrics.md` — lead time, FA/hr, ablation, N-CMAPSS score | Day 4 |
 | **Pre-trained weights committed to the repo** | Day 5 |
 
@@ -451,6 +515,7 @@ result. Do it on Day 4.
 - Do **not** train on raw sensor values. Ever. Residuals only.
 - Do **not** hand-pick an anomaly threshold. Calibrate it on healthy held-out data and be able to say how.
 - Do **not** report a bare RUL number without its uncertainty band.
+- Do **not** put the frontend's rank-8 figure on a slide. Recompute it on the sensitivity matrix first — it came from the coarse glyph matrix and the number will move.
 - Do **not** attempt a strict PDE-residual PINN. Scoped out deliberately, and we say why.
 - Do **not** train during the demo. Weights are committed.
 - **Do not build the GNN** unless Day 4 closed completely clean — and then only as a second isolation head *next to* the signature matrix, never as a replacement for it.
@@ -522,13 +587,15 @@ vocabulary, then make it about ten years newer.
 
 ### Deliverables
 
-| Item | By |
+| Item | Status |
 |---|---|
-| Vite scaffold + one live chart off a mocked socket | Day 1 |
-| uPlot strips, 3D engine from primitives, health binding | Day 2 |
-| Explain drawer, residual heatmap, alert ribbon, replay scrubber | Day 3 |
-| Mission risk map, route colouring, point-of-no-return marker | Day 4 |
-| Visual polish, post-flight PDF, empty states | Day 5 |
+| Vite scaffold, uPlot strip charts, health binding | **done** |
+| Interactive 3D engine from named primitives | **done** |
+| Explain drawer, residual heatmap, replay scrubber | **done** |
+| Mission risk map, draggable altitude, point-of-no-return | **done** |
+| Twin confidence / novelty channel | **done** |
+| Cross-engine differential | **done** |
+| Post-flight PDF, alert history, visual polish | remaining |
 
 **Not blocked on anyone:** mock the `pramana.health.v1` message from
 `docs/spec/telemetry-schema.md` and build the entire dashboard against it. When
@@ -852,6 +919,25 @@ geometry, limits, maps, which parity paths exist — lives in
 This is what makes the cross-engine transfer demonstration possible, and that
 demonstration is one of the five questions we can answer that other teams
 cannot.
+
+### Contract 6 — the live socket
+
+BE-1 publishes `{slow, fast, health, predicted}` JSON at
+**`ws://localhost:8000/ws/telemetry`**. The frontend retries in the background
+with backoff, so **starting the backend mid-session upgrades the dashboard from
+SIMULATED to LIVE with no reload.** Nothing on the frontend changes.
+
+`frontend/src/mock/missionGenerator.ts` stands in until then. Read it as a shape
+reference before writing the MVEM — it obeys the two rules yours must: **faults
+are parameter perturbations, never spikes pasted on a signal**, and **a sensor
+fault perturbs the measurement only, never the engine.** Then delete it.
+
+### Contract 7 — optional fields degrade gracefully
+
+The novelty and twin-confidence blocks are **optional** in the health frame.
+Publish everything else first and add them whenever; the UI hides the channel
+rather than showing a wrong number. The same rule applies to anything we add
+later — new fields are additive and never required.
 
 ### Contract 5 — provenance
 

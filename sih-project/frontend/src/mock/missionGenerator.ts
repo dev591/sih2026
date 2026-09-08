@@ -82,13 +82,18 @@ export const SCRIPT_BEATS = [
   { t: 40, label: 'Injector fouling begins — cylinder 2' },
   { t: 62, label: 'Anomaly score crosses threshold' },
   { t: 95, label: 'Isolation: injector fouling, cyl 2' },
+  { t: 120, label: 'Warm air mass — BOTH engines rise, differential does not' },
   { t: 140, label: 'RUL with uncertainty band' },
   { t: 165, label: 'Mission decision: continue / derate / RTB' },
-  { t: 120, label: 'Warm air mass — BOTH engines rise, differential does not' },
   { t: 200, label: 'CHT sensor 3 begins drifting — ENGINE IS HEALTHY' },
   { t: 235, label: 'Sensor fault correctly identified' },
   { t: 260, label: 'UNMODELLED fault — the twin says "I do not know"' },
-] as const;
+]
+  // Kept strictly in chronological order. The "which beat is active" logic
+  // compares against the NEXT entry, so an out-of-order array silently
+  // highlights the wrong chip — and the bar reads 2:45 then 2:00, which is
+  // exactly the sort of thing that costs you five seconds on stage.
+  .sort((a, b) => a.t - b.t) as readonly { t: number; label: string }[];
 
 const T_INJECTOR_START = 40;
 const T_SENSOR_DRIFT_START = 200;
