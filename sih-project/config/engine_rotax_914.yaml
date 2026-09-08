@@ -36,7 +36,7 @@ geometry:
   stroke_m: 0.0613
   compression_ratio: 9.0
   strokes_per_cycle: 4
-  gear_ratio: 2.4295             # reduction gearbox — propeller speed != crank speed
+  gear_ratio: 2.4295             # reduction gearbox — propeller speed != crank speed (keep in sync with propeller.gear_ratio)
 
 # ---------------------------------------------------------------------------
 # RATINGS — all published, all time-limited where noted
