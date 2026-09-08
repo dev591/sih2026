@@ -145,8 +145,8 @@ body {
 .panel-flag { width: 6px; height: 6px; border-radius: 50%; margin-left: auto; }
 .panel-body { padding: 11px; }
 
-.panel-3d { flex: 1 1 auto; min-height: 380px; }
-.panel-body-3d { padding: 0; flex: 1; min-height: 360px; }
+.panel-3d { flex: 1 1 auto; min-height: 452px; }
+.panel-body-3d { padding: 0; flex: 1; min-height: 432px; }
 
 /* ---------------- metrics ---------------- */
 .metric-grid {
@@ -437,3 +437,26 @@ body {
   .grid { grid-template-columns: 1fr; overflow-y: auto; }
   .col { overflow: visible; }
 }
+
+/* ---------------- 3D viewport ---------------- */
+.engine3d { width: 100%; height: 100%; position: relative; }
+.engine3d canvas { display: block; }
+.engine3d-hint {
+  position: absolute; bottom: 9px; left: 13px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  color: #3f4a5a; pointer-events: none;
+}
+
+/* ---------------- data source badge ---------------- */
+.brand-right { display: flex; align-items: center; gap: 10px; }
+.src-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  padding: 3px 9px; border-radius: 2px; border: 1px solid var(--line-2);
+  color: var(--text-dimr);
+}
+.src-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.src-live { color: var(--ok); border-color: #17493a; background: #071310; }
+.src-live .src-dot { box-shadow: 0 0 7px var(--ok); }
+.src-simulated { color: var(--warn); border-color: #4a3714; background: #14100a; }
+.src-connecting { color: var(--text-dimr); }

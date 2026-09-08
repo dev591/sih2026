@@ -226,7 +226,10 @@ function physicsAt(t: number, s: TrueState): Physics {
   const egt_C = fuel_delivered_per_cyl.map((f) => {
     const phi = (f * AFR_ST * N_CYL) / air_mass_flow; // local equivalence ratio
     const leanPenalty = Math.max(0, 1 - phi) * 340;
-    return 720 + leanPenalty - 40 * (1 - f / fuel_cmd_per_cyl);
+    // A weak cylinder burns late and incompletely: less of the released energy
+    // reaches the crank, more of it leaves through the port.
+    const foulPenalty = Math.max(0, 1 - f / fuel_cmd_per_cyl) * 900;
+    return 720 + leanPenalty + foulPenalty - 40 * (1 - f / fuel_cmd_per_cyl);
   });
 
   // Cylinder head thermal state follows exhaust temperature with cooling.
@@ -283,7 +286,7 @@ function makeTick(t: number, noise: (s: number) => number): MissionTick {
   const predicted = physicsAt(t, nominal);
 
   // ---- measured values = physics + sensor bias + noise ----
-  const egt_meas = phys.egt_C.map((v, i) => v + bias.egt_C[i] + noise(4.0));
+  const egt_meas = phys.egt_C.map((v, i) => v + bias.egt_C[i] + noise(2.2));
   const cht_meas = phys.cht_C.map((v, i) => v + bias.cht_C[i] + noise(0.6));
   const map_meas = phys.map_hPa + bias.map_hPa + noise(2.0);
   const lambda_meas = phys.lambda + bias.lambda + noise(0.006);

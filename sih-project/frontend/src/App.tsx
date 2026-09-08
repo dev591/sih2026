@@ -6,8 +6,36 @@ import {
 import { ChtChart, EgtChart } from './components/StripChart';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
-import { useCurrentTick } from './state/missionStore';
+import { useCurrentTick, useMission } from './state/missionStore';
 import './App.css';
+
+/** Where the data on screen came from. Deliberately prominent: a demo must
+ *  never let anyone mistake the simulator for a real engine, and being the ones
+ *  who say so first is worth more than hoping nobody asks. */
+function SourceBadge() {
+  const source = useMission((s) => s.source);
+  const frames = useMission((s) => s.liveFrames);
+  const error = useMission((s) => s.feedError);
+
+  const label =
+    source === 'live' ? 'LIVE · ENGINE TWIN FEED'
+      : source === 'connecting' ? 'CONNECTING…'
+      : 'SIMULATED · NO BACKEND';
+
+  return (
+    <span
+      className={`src-badge src-${source}`}
+      title={
+        source === 'live'
+          ? `${frames} frames received from the twin`
+          : `${error ?? 'not connected'} — running the local mission generator`
+      }
+    >
+      <span className="src-dot" />
+      {label}
+    </span>
+  );
+}
 
 function StatusBar() {
   const tick = useCurrentTick();
@@ -46,6 +74,7 @@ export default function App() {
           <span className="brand-sub">Over-determined engine twin · VRDE 180 hp aero-diesel</span>
         </div>
         <div className="brand-right">
+          <SourceBadge />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>
       </header>
