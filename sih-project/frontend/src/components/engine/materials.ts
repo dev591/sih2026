@@ -97,11 +97,18 @@ export function faultColour(p: number, isSensor: boolean): THREE.Color {
   );
 }
 
-/** Heat glow on the exhaust runners, anchored just above healthy cruise EGT
- *  (~818 degC) so the manifold sits dark until a cylinder actually departs
- *  from its siblings. A permanently red manifold tells you nothing. */
-export function exhaustHeat(egt: number): number {
-  return THREE.MathUtils.clamp((egt - 838) / 125, 0, 1);
+/**
+ * Heat glow on the exhaust runners.
+ *
+ * Anchored RELATIVE TO THE ACTIVE ENGINE's healthy cruise EGT, not to a fixed
+ * temperature. A Rotax runs hotter at cruise than the VRDE diesel, so a
+ * hardcoded anchor made a perfectly healthy Rotax glow red the moment the
+ * profile was switched. A permanently red manifold tells you nothing — the
+ * glow has to mean "this cylinder has departed from its siblings", which is a
+ * statement about the engine you are actually looking at.
+ */
+export function exhaustHeat(egt: number, nominalEgt: number): number {
+  return THREE.MathUtils.clamp((egt - (nominalEgt + 100)) / 125, 0, 1);
 }
 
 export const N_FINS = 9;

@@ -15,6 +15,7 @@ import {
   type FaultConfig,
 } from '../mock/missionGenerator';
 import { feed, type FeedSource } from '../net/feed';
+import { VRDE_180, engineById, type EngineProfile } from '../config/engines';
 import type { MissionTick } from '../types/telemetry';
 
 const MISSION = generateMission();
@@ -57,6 +58,7 @@ interface MissionState {
   /** Replace the fault configuration and regenerate the mission. */
   applyConfig: (cfg: FaultConfig, opts?: { seekTo?: number; blind?: boolean }) => void;
   reveal: () => void;
+  setEngine: (id: string) => void;
   setFeed: (source: FeedSource, error: string | null, frames: number) => void;
   /** Jump straight to a scripted beat — used by the demo shortcut bar. */
   seekTo: (t: number) => void;
@@ -74,6 +76,7 @@ export const useMission = create<MissionState>((set, get) => ({
   liveFrames: 0,
   config: SCRIPTED,
   blind: false,
+  engine: VRDE_180,
 
   tick: () => {
     const { ticks, index } = get();
@@ -102,7 +105,7 @@ export const useMission = create<MissionState>((set, get) => ({
   seekTo: (t) => set({ index: Math.max(0, Math.min(t, MISSION_DURATION_S)) }),
 
   applyConfig: (cfg, opts) => {
-    const ticks = generateFrom(cfg);
+    const ticks = generateFrom(cfg, get().engine);
     set({
       ticks,
       config: cfg,
@@ -115,6 +118,15 @@ export const useMission = create<MissionState>((set, get) => ({
   },
 
   reveal: () => set({ blind: false }),
+
+  /** Swap the engine. Everything downstream — geometry, limits, critical
+   *  altitude, which parity paths exist — follows from the profile, so this
+   *  is genuinely a configuration change and not a rebuild. */
+  setEngine: (id) => {
+    const engine = engineById(id);
+    const ticks = generateFrom(get().config, engine);
+    set({ engine, ticks, index: 0, playing: true, selectedCylinder: null, explainOpen: false });
+  },
 
   pushLive: (tick) =>
     set((s) => {

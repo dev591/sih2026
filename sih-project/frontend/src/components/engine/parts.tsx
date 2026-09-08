@@ -57,6 +57,7 @@ export interface CylinderProps {
   count: number;
   cht: number;
   egt: number;
+  chtRampFrom: number;
   anomaly: number;
   faultProb: number;
   isSensorFault: boolean;
@@ -68,7 +69,7 @@ export interface CylinderProps {
 }
 
 export function CylinderAssembly({
-  index, count, cht, anomaly, faultProb, isSensorFault,
+  index, count, cht, chtRampFrom, anomaly, faultProb, isSensorFault,
   selected, hovered, onSelect, onHover, crankAngle,
 }: CylinderProps) {
   const pistonRef = useRef<THREE.Mesh>(null);
@@ -91,7 +92,12 @@ export function CylinderAssembly({
     }
   });
 
-  const body = useMemo(() => thermalRamp(cht), [cht]);
+  // Ramp anchored to THIS engine's limits: a Rotax redlines at 135 degC and
+  // the VRDE at 200, so a fixed anchor would make one of them permanently hot.
+  const body = useMemo(
+    () => thermalRamp(cht, chtRampFrom, chtRampFrom + 55),
+    [cht, chtRampFrom]
+  );
   const glow = useMemo(() => faultColour(faultProb, isSensorFault), [faultProb, isSensorFault]);
   const glowI = 0.06 + 0.94 * anomaly;
 
@@ -364,7 +370,10 @@ export function IntakeSystem({ count }: { count: number }) {
 // ---------------------------------------------------------------------------
 // EXHAUST — one runner per cylinder into a collector, then the turbine
 // ---------------------------------------------------------------------------
-export function ExhaustSystem({ egt, count }: { egt: number[]; count: number }) {
+export function ExhaustSystem(
+  { egt, count, nominalEgt, chtRampFrom }: { egt: number[]; count: number; nominalEgt: number; chtRampFrom: number }
+) {
+  void chtRampFrom;
   const collector = useMemo(
     () => new THREE.Vector3(count * 1.42 * 0.5 + 0.30, 0.18, 0.66),
     [count]
@@ -389,7 +398,7 @@ export function ExhaustSystem({ egt, count }: { egt: number[]; count: number }) 
   return (
     <group>
       {tubes.map((g, i) => {
-        const heat = exhaustHeat(egt[i] ?? 0);
+        const heat = exhaustHeat(egt[i] ?? 0, nominalEgt);
         return (
           <mesh key={i} geometry={g} castShadow>
             <meshStandardMaterial

@@ -50,6 +50,7 @@ function Rig() {
 
 function Scene() {
   const tick = useCurrentTick();
+  const engine = useMission((s) => s.engine);
   const selected = useMission((s) => s.selectedCylinder);
   const selectCylinder = useMission((s) => s.selectCylinder);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -95,6 +96,7 @@ function Scene() {
             count={N_CYL}
             cht={tick.slow.cht_C[i]}
             egt={tick.slow.egt_C[i]}
+            chtRampFrom={engine.chtRampFrom_C}
             anomaly={cylFault[i] > 0.3 ? anomaly.score : anomaly.score * 0.08}
             faultProb={cylFault[i]}
             isSensorFault={cylSensor[i]}
@@ -107,7 +109,12 @@ function Scene() {
         ))}
 
         <IntakeSystem count={N_CYL} />
-        <ExhaustSystem egt={tick.slow.egt_C} count={N_CYL} />
+        <ExhaustSystem
+          egt={tick.slow.egt_C}
+          count={N_CYL}
+          nominalEgt={engine.nominalEgt_C}
+          chtRampFrom={engine.chtRampFrom_C}
+        />
         <Turbocharger
           rpm={tick.slow.turbo_rpm}
           effScale={tick.health.theta.eta_c_scale.value}

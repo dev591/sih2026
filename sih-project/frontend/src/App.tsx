@@ -10,11 +10,37 @@ import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
 import { useCurrentTick, useMission } from './state/missionStore';
+import { ENGINES } from './config/engines';
 import './App.css';
 
 /** Where the data on screen came from. Deliberately prominent: a demo must
  *  never let anyone mistake the simulator for a real engine, and being the ones
  *  who say so first is worth more than hoping nobody asks. */
+/**
+ * Engine selector. "A new engine is a config change, not a rewrite" is one of
+ * the claims that separates this from every other submission — so it has to be
+ * demonstrable, not merely asserted. Switching here re-derives geometry,
+ * limits, critical altitude and WHICH PARITY PATHS EXIST from the profile.
+ */
+function EngineSelector() {
+  const engine = useMission((s) => s.engine);
+  const setEngine = useMission((s) => s.setEngine);
+  return (
+    <div className="eng-sel">
+      {ENGINES.map((e) => (
+        <button
+          key={e.id}
+          className={`eng-btn${engine.id === e.id ? ' eng-btn-on' : ''}`}
+          onClick={() => setEngine(e.id)}
+          title={`${e.name} — ${e.developer}`}
+        >
+          {e.short}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SourceBadge() {
   const source = useMission((s) => s.source);
   const frames = useMission((s) => s.liveFrames);
@@ -67,6 +93,17 @@ function StatusBar() {
   );
 }
 
+function EngineSubtitle() {
+  const engine = useMission((s) => s.engine);
+  const paths = Object.values(engine.parityPaths).filter(Boolean).length;
+  return (
+    <span className="brand-sub">
+      Over-determined engine twin · {engine.name} · {paths} parity paths →{' '}
+      {paths - 1} independent air-path residuals
+    </span>
+  );
+}
+
 export default function App() {
   return (
     <div className="app">
@@ -74,9 +111,10 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark">प्रमाण</span>
           <span className="brand-name">PRAMANA</span>
-          <span className="brand-sub">Over-determined engine twin · VRDE 180 hp aero-diesel</span>
+          <EngineSubtitle />
         </div>
         <div className="brand-right">
+          <EngineSelector />
           <SourceBadge />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>

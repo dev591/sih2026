@@ -23,6 +23,7 @@
  */
 
 import { computeNovelty, nullSpaceDirection } from '../analysis/novelty';
+import { VRDE_180, type EngineProfile } from '../config/engines';
 import {
   N_CYL,
   type FaultId,
@@ -175,13 +176,14 @@ export const SCRIPTED: FaultConfig = {
   warmAirMass: true,
 };
 
-// Cruise operating point
-const CRUISE = {
-  altitude_ft: 18000,
-  rpm: 3580,
+// Cruise operating point, derived from the active engine profile. Nothing
+// engine-specific may be hardcoded below this line.
+const cruiseOf = (e: EngineProfile) => ({
+  altitude_ft: e.cruiseAltitude_ft,
+  rpm: e.cruiseRpm,
   throttle_pct: 72,
-  tas_mps: 61.2,
-};
+  tas_mps: e.cruiseTas_mps,
+});
 
 // ---------------------------------------------------------------------------
 // The engine's TRUE internal state — what is physically happening.
@@ -259,11 +261,7 @@ function sensorBiasAt(t: number, cfg: FaultConfig = SCRIPTED): SensorBias {
 // Mean-value engine model, reduced. Same structure as the real thing so the
 // numbers move in the right directions for the right reasons.
 // ---------------------------------------------------------------------------
-const V_D = 2.0e-3;        // swept volume [m^3]
-const R_AIR = 287.05;
-const Q_LHV = 43.0e6;      // J/kg
-const AFR_ST = 14.5;
-const ETA_V_NOM = 0.88;
+const R_AIR = 287.05;      // gas constant for air — not engine-specific
 const ETA_I = 0.40;        // indicated efficiency
 
 interface Physics {
@@ -283,11 +281,16 @@ interface Physics {
   ripple: number;
 }
 
-function physicsAt(t: number, s: TrueState, cfg: FaultConfig = SCRIPTED): Physics {
+function physicsAt(
+  t: number, s: TrueState, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+): Physics {
+  const CRUISE = cruiseOf(eng);
+  const { displacement_m3: V_D, Q_LHV, AFR_stoich: AFR_ST, etaV_nominal: ETA_V_NOM } = eng;
+  const N_CYL_E = eng.cylinders;
   const atm = isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg));
 
   // Turbo holds boost below critical altitude; degrade eta_c and boost falls.
-  const boostRatio = 1.72 * s.eta_c_scale;
+  const boostRatio = eng.boostRatio * s.eta_c_scale;
   const map_Pa = atm.p * boostRatio;
   const map_hPa = map_Pa / 100;
 
@@ -301,7 +304,7 @@ function physicsAt(t: number, s: TrueState, cfg: FaultConfig = SCRIPTED): Physic
 
   // FADEC commands a fuel quantity per cylinder to hold the power setting.
   const fuel_cmd_total = air_mass_flow / (AFR_ST * 1.42);
-  const fuel_cmd_per_cyl = fuel_cmd_total / N_CYL;
+  const fuel_cmd_per_cyl = fuel_cmd_total / N_CYL_E;
 
   // A FOULED INJECTOR DELIVERS LESS THAN COMMANDED. Everything downstream
   // follows from this single line — we never write "EGT goes up".
@@ -315,18 +318,18 @@ function physicsAt(t: number, s: TrueState, cfg: FaultConfig = SCRIPTED): Physic
   // the energy out of the exhaust port instead of into the crankshaft, so a
   // fouled cylinder runs HOTTER even though it burns less fuel.
   const egt_C = fuel_delivered_per_cyl.map((f) => {
-    const phi = (f * AFR_ST * N_CYL) / air_mass_flow; // local equivalence ratio
+    const phi = (f * AFR_ST * N_CYL_E) / air_mass_flow; // local equivalence ratio
     const leanPenalty = Math.max(0, 1 - phi) * 340;
     // A weak cylinder burns late and incompletely: less of the released energy
     // reaches the crank, more of it leaves through the port.
     const foulPenalty = Math.max(0, 1 - f / fuel_cmd_per_cyl) * 900;
-    return 720 + leanPenalty + foulPenalty - 40 * (1 - f / fuel_cmd_per_cyl);
+    return eng.nominalEgt_C + leanPenalty + foulPenalty - 40 * (1 - f / fuel_cmd_per_cyl);
   });
 
   // Cylinder head thermal state follows exhaust temperature with cooling.
   const cht_C = egt_C.map((e) => {
-    const q = (e - 700) * 0.09;
-    return 128 + q / s.hA_scale;
+    const q = (e - (eng.nominalEgt_C - 20)) * 0.09;
+    return eng.nominalCht_C + q / s.hA_scale;
   });
 
   // Crankshaft: a weak cylinder contributes less torque.
@@ -336,12 +339,12 @@ function physicsAt(t: number, s: TrueState, cfg: FaultConfig = SCRIPTED): Physic
   // 0.5-ENGINE-ORDER RIPPLE. In a four-stroke each cylinder fires once per
   // 720 deg, so ANY single-cylinder imbalance shows at half engine order.
   // Zero for a balanced engine. This is what localises the fault.
-  const mean = fuel_delivered_per_cyl.reduce((a, b) => a + b, 0) / N_CYL;
+  const mean = fuel_delivered_per_cyl.reduce((a, b) => a + b, 0) / N_CYL_E;
   const imbalance =
     Math.max(...fuel_delivered_per_cyl.map((f) => Math.abs(f - mean))) / mean;
   const ripple = 0.004 + imbalance * 0.62;
 
-  const turbo_rpm = 118400 * s.eta_c_scale * (map_hPa / 1187);
+  const turbo_rpm = 118400 * s.eta_c_scale * (map_hPa / (atm.p / 100 * eng.boostRatio));
   const oil_press_bar = 3.42 / s.f_fric_scale;
   const oil_temp_C = 96.3 + (s.f_fric_scale - 1) * 40;
 
@@ -374,9 +377,12 @@ function physicsAt(t: number, s: TrueState, cfg: FaultConfig = SCRIPTED): Physic
 // B stays healthy for the whole mission, so every difference that survives the
 // subtraction belongs to A.
 // ---------------------------------------------------------------------------
-function makeEngineB(t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED): SlowFrame {
+function makeEngineB(
+  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+): SlowFrame {
+  const CRUISE = cruiseOf(eng);
   const healthy = trueStateAt(0, cfg);
-  const phys = physicsAt(t, healthy, cfg);
+  const phys = physicsAt(t, healthy, cfg, eng);
   return {
     schema: 'pramana.slow.v1',
     t,
@@ -412,15 +418,20 @@ function makeEngineB(t: number, noise: (s: number) => number, cfg: FaultConfig =
 // ---------------------------------------------------------------------------
 // Generate one tick
 // ---------------------------------------------------------------------------
-function makeTick(t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED): MissionTick {
+function makeTick(
+  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+): MissionTick {
+  const CRUISE = cruiseOf(eng);
+  const AFR_ST = eng.AFR_stoich;
+  const N_CYL_E = eng.cylinders;
   const trueS = trueStateAt(t, cfg);
   const bias = sensorBiasAt(t, cfg);
-  const phys = physicsAt(t, trueS, cfg);
+  const phys = physicsAt(t, trueS, cfg, eng);
 
   // The TWIN's prediction assumes a HEALTHY engine — nominal parameters.
   // The gap between this and the measurement is the entire product.
   const nominal = trueStateAt(0, cfg);
-  const predicted = physicsAt(t, nominal, cfg);
+  const predicted = physicsAt(t, nominal, cfg, eng);
 
   // ---- measured values = physics + sensor bias + noise ----
   const egt_meas = phys.egt_C.map((v, i) => v + bias.egt_C[i] + noise(2.2));
@@ -484,7 +495,7 @@ function makeTick(t: number, noise: (s: number) => number, cfg: FaultConfig = SC
   // measured lambda rises, and Path 3 over-reads relative to Path 1.
   const mdot_sd = phys.air_mass_flow;
   const mdot_comp = predicted.air_mass_flow * (1 + noise(0.001));
-  const mdot_lambda = lambda_meas * AFR_ST * (phys.fuel_cmd_per_cyl * N_CYL);
+  const mdot_lambda = lambda_meas * AFR_ST * (phys.fuel_cmd_per_cyl * N_CYL_E);
 
   const rho1 = ((mdot_sd - mdot_comp) / predicted.air_mass_flow) * 340 + noise(0.25);
   const rho2 = ((mdot_sd - mdot_lambda) / predicted.air_mass_flow) * 340 + noise(0.25);
@@ -506,8 +517,8 @@ function makeTick(t: number, noise: (s: number) => number, cfg: FaultConfig = SC
   // Per-cylinder thermal deviation from the CONDITIONAL MEAN across cylinders.
   // Conditional, not absolute — that is what makes it operating-point invariant,
   // and it is why a drifting sensor shows up here with nothing to corroborate it.
-  const chtMean = cht_meas.reduce((a, b) => a + b, 0) / N_CYL;
-  const egtMean = egt_meas.reduce((a, b) => a + b, 0) / N_CYL;
+  const chtMean = cht_meas.reduce((a, b) => a + b, 0) / N_CYL_E;
+  const egtMean = egt_meas.reduce((a, b) => a + b, 0) / N_CYL_E;
   const rho6_9 = cht_meas.map((c, i) => {
     const dCht = (c - chtMean) / 0.9;
     const dEgt = (egt_meas[i] - egtMean) / 6.0;
@@ -728,9 +739,14 @@ function makeTick(t: number, noise: (s: number) => number, cfg: FaultConfig = SC
     rho: {
       rho1_sd_vs_comp: rhoVec[0] as number,
       rho2_sd_vs_lambda: rhoVec[1] as number,
-      // Path 4 does not exist on an unthrottled FADEC aero-diesel.
-      // null, never a fabricated number.
-      rho3_sd_vs_restr: null,
+      // Path 4 exists only where there is a metering restriction. On an
+      // unthrottled FADEC aero-diesel there is none, so we report NULL — never
+      // a fabricated number. On a throttled engine the path is live and the
+      // framework gains a third independent air-path residual.
+      rho3_sd_vs_restr: eng.parityPaths.intakeRestriction
+        ? ((mdot_sd - predicted.air_mass_flow * (1 + noise(0.0015))) /
+            predicted.air_mass_flow) * 340 + noise(0.3)
+        : null,
       rho4_energy: rhoVec[3] as number,
       rho5_power: rhoVec[4] as number,
       rho6_9_cyl_dev: rhoVec.slice(5, 9) as number[],
@@ -797,7 +813,7 @@ function makeTick(t: number, noise: (s: number) => number, cfg: FaultConfig = SC
 
   return {
     slow,
-    slowB: makeEngineB(t, noise, cfg),
+    slowB: makeEngineB(t, noise, cfg, eng),
     fast,
     health,
     predicted: {
@@ -824,24 +840,21 @@ let cached: MissionTick[] | null = null;
  * through exactly the path being demonstrated, which is the point: there is no
  * separate "sandbox mode" whose behaviour could diverge from the real thing.
  */
-export function generateFrom(cfg: FaultConfig, seed = 0x5148): MissionTick[] {
+export function generateFrom(
+  cfg: FaultConfig, eng: EngineProfile = VRDE_180, seed = 0x5148
+): MissionTick[] {
   const noise = makeNoise(seed);
   const ticks: MissionTick[] = [];
   for (let t = 0; t <= MISSION_DURATION_S; t += 1 / HEALTH_HZ) {
-    ticks.push(makeTick(t, noise, cfg));
+    ticks.push(makeTick(t, noise, cfg, eng));
   }
   return ticks;
 }
 
 export function generateMission(): MissionTick[] {
   if (cached) return cached;
-  const noise = makeNoise(0x5148);
-  const ticks: MissionTick[] = [];
-  for (let t = 0; t <= MISSION_DURATION_S; t += 1 / HEALTH_HZ) {
-    ticks.push(makeTick(t, noise));
-  }
-  cached = ticks;
-  return ticks;
+  cached = generateFrom(SCRIPTED, VRDE_180);
+  return cached;
 }
 
 export const FOULED_CYLINDER = FOULED_CYL;

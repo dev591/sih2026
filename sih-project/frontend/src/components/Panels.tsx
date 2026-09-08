@@ -352,15 +352,27 @@ export function MissionPanel() {
 // ---------------------------------------------------------------------------
 export function LimitsPanel() {
   const tick = useCurrentTick();
+  const engine = useMission((s) => s.engine);
   const { slow, health } = tick;
 
-  const rows = [
-    { label: 'CHT max', v: Math.max(...slow.cht_C), lim: 200, unit: '°C' },
-    { label: 'Oil pressure', v: slow.oil_press_bar, lim: 2.0, unit: 'bar', inverted: true },
-    { label: 'Oil temp', v: slow.oil_temp_C, lim: 130, unit: '°C' },
-    { label: 'MAP', v: slow.map_hPa, lim: 1900, unit: 'hPa' },
-    { label: 'RPM', v: slow.rpm, lim: 3800, unit: 'rpm' },
-  ];
+  // Limits come from the ACTIVE ENGINE PROFILE, never from a literal in this
+  // file. Switch engines and every redline on screen changes with it.
+  const value: Record<string, number> = {
+    cht: Math.max(...slow.cht_C),
+    oilp: slow.oil_press_bar,
+    oilt: slow.oil_temp_C,
+    map: slow.map_hPa,
+    rpm: slow.rpm,
+  };
+  const rows = engine.limits.map((l) => ({
+    label: l.label,
+    v: value[l.key] ?? 0,
+    lim: l.limit,
+    unit: l.unit,
+    inverted: l.inverted,
+    decimals: l.decimals,
+    provenance: l.provenance,
+  }));
 
   return (
     <Panel
@@ -379,7 +391,7 @@ export function LimitsPanel() {
                 <span className={`limit-fill tone-bg-${tone}`} style={{ width: `${Math.min(100, frac * 100)}%` }} />
               </span>
               <span className={`limit-value tone-${tone}`}>
-                {r.v.toFixed(r.unit === 'bar' ? 2 : 0)}<span className="metric-unit">{r.unit}</span>
+                {r.v.toFixed(r.decimals ?? 0)}<span className="metric-unit">{r.unit}</span>
               </span>
             </div>
           );
@@ -389,6 +401,10 @@ export function LimitsPanel() {
         {health.limits_state === 'green' ? 'ALL PARAMETERS GREEN' : health.limits_state.toUpperCase()}
       </div>
       <p className="note">
+        Limits are read from the <strong>{engine.short}</strong> profile, not
+        hardcoded — {engine.limits.every((l) => l.provenance === 'published')
+          ? 'all published and citable'
+          : 'some are engineering estimates and are labelled as such in the profile'}.
         Note the EGT row is absent: the type certificate for this class publishes
         <strong> no EGT limit at all</strong>. EGT is a trend parameter, not a
         redline parameter — a threshold system has no way to use it.

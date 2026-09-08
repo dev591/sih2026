@@ -19,7 +19,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { useCurrentTick } from '../state/missionStore';
+import { useCurrentTick, useMission } from '../state/missionStore';
 import { Panel } from './Panels';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ function riskColour(p: number): string {
 
 export function MissionMap() {
   const tick = useCurrentTick();
+  const engine = useMission((s) => s.engine);
   const { mission, rul, virtual } = tick.health;
   const baseAlt = tick.slow.altitude_ft;
 
@@ -78,7 +79,7 @@ export function MissionMap() {
   // pressure, so the compressor is the binding constraint on available power
   // and any compressor degradation becomes mission-limiting. Below it, the
   // engine is working less hard and damage accrues more slowly.
-  const CRITICAL_FT = 11000;
+  const CRITICAL_FT = engine.criticalAltitude_ft;
   const overCritical = Math.max(0, alt - CRITICAL_FT) / 1000;
   const baseOver = Math.max(0, baseAlt - CRITICAL_FT) / 1000;
 
@@ -186,7 +187,7 @@ export function MissionMap() {
         <div className="alt-scale">
           <span>8 000</span>
           <span className="alt-crit" title="Critical altitude — above this the turbo cannot hold rated boost">
-            11 000 · critical
+            {CRITICAL_FT.toLocaleString()} · critical
           </span>
           <span>28 000</span>
         </div>
