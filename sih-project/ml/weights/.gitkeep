@@ -1,0 +1,2 @@
+# Pre-trained weights go here after running ml/train.py
+# Commit these — the demo must never train live.

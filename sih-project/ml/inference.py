@@ -1,0 +1,209 @@
+"""
+ML inference pipeline — called once per 1 Hz health frame.
+
+Loads pre-trained weights at startup; exposes one function:
+
+    result = InferencePipeline.run(rho, damage_state, damage_rate_per_hr)
+
+Returns anomaly, diagnosis, rul, novelty, twin_confidence, theta blocks
+of pramana.health.v1 (docs/spec/telemetry-schema.md).
+
+Residuals arrive normalised by sigma_vector.json (sigma units). This file
+assumes that normalisation has already been applied by BE-1's parity layer.
+Do NOT divide by sigma again here.
+
+The pipeline never trains or modifies weights.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import torch
+
+from ml.m2_autoencoder.model import LSTMAutoencoder, PersistenceRule
+from ml.m3_classifier.model import M3ClassifierModel, diagnose
+from ml.m3_rul.model import RULModel, rul_report, physics_rul
+from ml.novelty.projection import NoveltyProjector
+from ml.ukf.filter import HealthUKF
+from ml.incidence import N_RESIDUALS, FAULT_NAMES
+
+WEIGHTS_DIR = Path(__file__).parent / "weights"
+
+# Significance calibration — re-derive from healthy_flights/*.parquet when available.
+RHO_FLOOR = 1.5    # 99th pct of ‖ρ‖ on healthy engine
+RHO_FULL  = 6.0    # "clearly anomalous" level
+
+
+class InferencePipeline:
+    """
+    Stateful inference wrapper. One instance per engine (A / B).
+    Load once at startup; call run() at 1 Hz.
+    """
+
+    def __init__(
+        self,
+        window_len: int = 32,
+        device: str = "cpu",
+        weights_dir: Path = WEIGHTS_DIR,
+    ):
+        self.device     = device
+        self.window_len = window_len
+        self._rho_buf: list[list[float]] = []
+
+        # ── M2 ───────────────────────────────────────────────────────────
+        self.m2 = LSTMAutoencoder(
+            input_dim=N_RESIDUALS, hidden_dim=64,
+            latent_dim=16, seq_len=window_len
+        )
+        _load(self.m2, weights_dir / "m2_weights.pt", "M2", device)
+        self.m2.eval()
+
+        td = _load_json(weights_dir / "m2_threshold.json",
+                        {"threshold": 0.5, "persistence": {"n": 4, "of": 5}})
+        self.anomaly_threshold = float(td["threshold"])
+        self.persistence = PersistenceRule(
+            n=td["persistence"]["n"],
+            m=td["persistence"]["of"],
+        )
+
+        # ── M3 classifier ─────────────────────────────────────────────────
+        self.m3_cls = M3ClassifierModel(n_fault_classes=len(FAULT_NAMES),
+                                        input_dim=N_RESIDUALS)
+        _load(self.m3_cls, weights_dir / "m3_classifier_weights.pt", "M3-cls", device)
+        self.m3_cls.eval()
+
+        # ── M3 RUL ───────────────────────────────────────────────────────
+        self.m3_rul = RULModel(input_dim=N_RESIDUALS, seq_len=window_len)
+        _load(self.m3_rul, weights_dir / "m3_rul_weights.pt", "M3-rul", device)
+        self.m3_rul.eval()
+
+        # ── Novelty ──────────────────────────────────────────────────────
+        self.projector = NoveltyProjector()
+        nd = _load_json(weights_dir / "novelty_report.json", {"threshold_99p5": 0.42})
+        self.novelty_threshold = float(nd.get("threshold_99p5", 0.42))
+
+        # ── UKF ──────────────────────────────────────────────────────────
+        self.ukf = HealthUKF()
+
+        print(
+            f"[Inference] Ready  "
+            f"anomaly_thresh={self.anomaly_threshold:.4f}  "
+            f"novelty_thresh={self.novelty_threshold:.4f}  "
+            f"null_space_dim={self.projector.null_space_dim}"
+        )
+
+    def run(
+        self,
+        rho: list[Optional[float]],
+        damage_state: float = 0.0,
+        damage_rate_per_hr: float = 0.0,
+        top_k: int = 2,
+    ) -> dict:
+        """
+        Parameters
+        ----------
+        rho : 11-element list in sigma units (None for unavailable paths)
+        damage_state : D ∈ [0,1] from BE-1's damage integrator
+        damage_rate_per_hr : dD/dt from BE-1
+        """
+        rho_arr = np.array([x if x is not None else np.nan for x in rho], dtype=float)
+        rho_nn  = np.where(np.isnan(rho_arr), 0.0, rho_arr).astype(np.float32)
+
+        # Rolling window
+        self._rho_buf.append(rho_nn.tolist())
+        if len(self._rho_buf) > self.window_len:
+            self._rho_buf.pop(0)
+
+        pad      = self.window_len - len(self._rho_buf)
+        window_np = np.array(
+            [[0.0] * N_RESIDUALS] * pad + self._rho_buf,
+            dtype=np.float32
+        )
+        window_t = torch.from_numpy(window_np).unsqueeze(0)  # (1, T, 11)
+
+        # M2 — anomaly
+        with torch.no_grad():
+            ae_err = float(self.m2.reconstruction_error(window_t).item())
+        alarm = self.persistence.update(ae_err > self.anomaly_threshold)
+
+        # M3 — classifier
+        with torch.no_grad():
+            logits = self.m3_cls(window_t)
+            probs  = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+
+        # M3 — RUL
+        with torch.no_grad():
+            rul_q = self.m3_rul(window_t).squeeze(0).cpu().numpy()  # [p10,p50,p90]
+
+        top_diag  = diagnose(rho_nn, probs)[:top_k]
+        top_fault = top_diag[0]["fault"] if top_diag else "unknown"
+
+        instr = {"map_sensor_drift", "egt_sensor_drift",
+                 "cht_sensor_drift", "lambda_sensor_drift"}
+        is_sensor = top_fault in instr
+
+        diagnosis_block = {
+            "top": [
+                {"fault": d["fault"], "p": round(d["p_combined"], 3),
+                 "source": d["source"]}
+                for d in top_diag
+            ],
+            "is_sensor_fault": is_sensor,
+            "ambiguous": bool(
+                len(top_diag) >= 2 and
+                abs(top_diag[0]["p_combined"] - top_diag[1]["p_combined"]) < 0.15
+            ),
+        }
+
+        phys = physics_rul(damage_state, damage_rate_per_hr)
+        rul_block = rul_report(
+            p10=float(rul_q[0]), p50=float(rul_q[1]), p90=float(rul_q[2]),
+            physics_h=phys, component=top_fault,
+        )
+
+        # UKF
+        self.ukf.step(rho_arr)
+        theta_block = self.ukf.health_frame()
+
+        # Novelty
+        nov      = self.projector.project(rho_arr)
+        nov_blks = nov.to_health_frame(
+            threshold=self.novelty_threshold,
+            rho_floor=RHO_FLOOR, rho_full=RHO_FULL,
+        )
+
+        return {
+            "anomaly":   {
+                "score":       round(ae_err, 4),
+                "threshold":   round(self.anomaly_threshold, 4),
+                "persistence": {"n": self.persistence.n,
+                                "of": self.persistence.m,
+                                "met": alarm},
+            },
+            "diagnosis": diagnosis_block,
+            "rul":       rul_block,
+            "theta":     theta_block,
+            **nov_blks,
+        }
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def _load(model: torch.nn.Module, path: Path, name: str, device: str) -> None:
+    if path.exists():
+        model.load_state_dict(
+            torch.load(path, map_location=device, weights_only=True)
+        )
+        print(f"[Inference] Loaded {name} ← {path.name}")
+    else:
+        print(f"[Inference] WARNING: {name} weights not found at {path} — using untrained model")
+
+
+def _load_json(path: Path, default: dict) -> dict:
+    if path.exists():
+        return json.loads(path.read_text())
+    return default
