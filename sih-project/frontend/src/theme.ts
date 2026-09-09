@@ -25,9 +25,11 @@ export const C = {
   line2: '#c6d1de',
 
   // type
+  // All three clear WCAG AA against bg. textDimr was #8a97a7 (2.75:1) and
+  // textDim #5a6a7d; see the note in App.css, which these mirror.
   text: '#16202c',
-  textDim: '#5a6a7d',
-  textDimr: '#8a97a7',
+  textDim: '#4d5b6b',
+  textDimr: '#647284',
 
   // status
   ok: '#047857',

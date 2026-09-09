@@ -241,21 +241,26 @@ export function CylinderTag({
     // drei's Html defaults zIndexRange to [16777271, 0], which puts these tags
     // above every overlay in the app — they were drawing on top of the
     // post-flight report. Keep them above the canvas and below the drawers.
+    // No distanceFactor: a readout is UI, not geometry. With it, the tag
+    // scaled with the scene and shrank to a few illegible pixels at normal
+    // framing — the per-cylinder CHT and which cylinder is faulted are the
+    // most important numbers on this view, and they have to survive a
+    // projector at the back of a room.
     <Html
       position={[CYL_X(index, count), 2.12, 0]}
       center
-      distanceFactor={4.4}
       zIndexRange={[30, 0]}
     >
       <div
         style={{
           fontFamily: 'ui-monospace, Menlo, monospace',
-          fontSize: 11,
+          fontSize: 11.5,
+          fontWeight: active ? 600 : 500,
           fontVariantNumeric: 'tabular-nums',
           letterSpacing: '0.04em',
           color: active ? accent : C.textDim,
           background: active ? C.panel : 'rgba(255,255,255,0.88)',
-          padding: '2px 7px',
+          padding: '2px 6px',
           borderRadius: 2,
           border: `1px solid ${active ? accent : C.line2}`,
           boxShadow: active

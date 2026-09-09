@@ -16,9 +16,15 @@
   --line-2:    #c6d1de;
   --void:      #e8edf3;
 
-  --text:      #16202c;
-  --text-dim:  #5a6a7d;
-  --text-dimr: #8a97a7;
+  /* Three steps, all measured against --bg and all clearing WCAG AA 4.5:1.
+     --text-dimr was #8a97a7, which measured 2.75:1 — below even the 3:1
+     large-text floor, across 49 call sites carrying units, axis labels and
+     panel subtitles. It read as mush on a projector. --text-dim moved with
+     it so the hierarchy keeps its separation instead of collapsing into
+     two near-identical greys. */
+  --text:      #16202c;   /* 15.19:1 */
+  --text-dim:  #4d5b6b;   /*  6.41:1 */
+  --text-dimr: #647284;   /*  4.53:1 */
 
   --ok:        #047857;
   --warn:      #b45309;
@@ -489,6 +495,19 @@ body {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
   color: var(--text-dimr); pointer-events: none;
 }
+
+/* Recovery from a judge's orbit. Same corner idiom as the hint rather than a
+   new visual language — it should read as part of the viewport furniture, not
+   as a control competing with the panels. */
+.engine3d-reset {
+  position: absolute; bottom: 7px; right: 13px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  color: var(--text-dimr); background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 2px;
+  padding: 3px 8px; cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.engine3d-reset:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---------------- data source badge ---------------- */
 .brand-right { display: flex; align-items: center; gap: 10px; }
