@@ -17,8 +17,19 @@ def compute_residuals(measured: dict, predicted: dict, cfg: dict, sigma_vec: lis
     rho2 = ((m_sd - m_lambda) / p_m_a) * 340.0
     
     if cfg.get('parity_paths', {}).get('intake_restriction', False):
-        m_r = predicted['air_mass_flow']
-        rho3 = ((m_sd - m_r) / p_m_a) * 340.0
+        # Path 4 (residual-spec.md §1): ṁ_R = C_d·A·(p_us/√(R·T_us))·Ψ(p_ds/p_us),
+        # the compressible-orifice relation through a throttle body or metering
+        # restriction — a genuinely independent estimate of air mass flow, not
+        # a restatement of Path 1's speed-density number. No engine profile in
+        # this repo declares intake_restriction (the VRDE is an unthrottled
+        # FADEC diesel with no Path 4 sensor — spec: "do not fabricate rho3"),
+        # so this stays unimplemented rather than emit a wrong number.
+        raise NotImplementedError(
+            "parity_paths.intake_restriction is set but Path 4 (orifice "
+            "relation) has no implementation. Do not fabricate rho3 by "
+            "reusing another path's air-mass estimate — see residual-spec.md "
+            "§1."
+        )
     else:
         rho3 = None
         

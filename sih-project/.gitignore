@@ -1,1 +1,4 @@
 # Add SIH project-specific ignores here
+__pycache__/
+*.pyc
+.venv/

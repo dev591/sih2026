@@ -76,7 +76,7 @@ limits:
 # ---------------------------------------------------------------------------
 fuel:
   type: jet_a1                   # aero-diesel runs heavy fuel
-  Q_LHV_J_per_kg: 43.0e6         # lower heating value
+  Q_LHV_J_per_kg: 43.0e+6        # lower heating value
   AFR_stoich: 14.5
   provenance: published
 

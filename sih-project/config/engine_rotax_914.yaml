@@ -85,7 +85,7 @@ limits:
 # ---------------------------------------------------------------------------
 fuel:
   type: avgas_100ll
-  Q_LHV_J_per_kg: 43.5e6
+  Q_LHV_J_per_kg: 43.5e+6
   AFR_stoich: 14.7               # spark ignition, stoichiometric gasoline
   provenance: published
 
