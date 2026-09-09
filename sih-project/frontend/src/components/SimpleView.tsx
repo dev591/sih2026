@@ -14,7 +14,7 @@
  * That is the pitch compressed, not the pitch discarded.
  */
 
-import { Engine3D } from './Engine3D';
+import { EngineSlot } from './EngineSlot';
 import {
   DiagnosisPanel, HealthParamsPanel, LimitsPanel, MissionPanel,
   ResidualHeatmap, RulPanel, TwinConfidencePanel, VirtualSensorPanel,
@@ -80,7 +80,7 @@ export function SimpleView() {
 
   return (
     <div className="stage">
-      <Engine3D />
+      <EngineSlot className="engine-slot" />
       <VerdictCard />
 
       <nav className="edge-tabs-left">

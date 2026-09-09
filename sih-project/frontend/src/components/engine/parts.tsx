@@ -238,7 +238,15 @@ export function CylinderTag({
   // by hand, so the tag drew a different amber than the cylinder underneath it.
   const accent = isSensorFault ? C.sensor : C.warn;
   return (
-    <Html position={[CYL_X(index, count), 2.12, 0]} center distanceFactor={4.4}>
+    // drei's Html defaults zIndexRange to [16777271, 0], which puts these tags
+    // above every overlay in the app — they were drawing on top of the
+    // post-flight report. Keep them above the canvas and below the drawers.
+    <Html
+      position={[CYL_X(index, count), 2.12, 0]}
+      center
+      distanceFactor={4.4}
+      zIndexRange={[30, 0]}
+    >
       <div
         style={{
           fontFamily: 'ui-monospace, Menlo, monospace',

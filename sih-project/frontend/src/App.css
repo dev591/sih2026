@@ -475,6 +475,15 @@ body {
 /* ---------------- 3D viewport ---------------- */
 .engine3d { width: 100%; height: 100%; position: relative; }
 .engine3d canvas { display: block; }
+
+/* The single persistent engine, positioned over whichever slot is active.
+   z-index sits above panel bodies but below the edge tabs (12), drawers (20,
+   40) and the report (400), so every overlay still covers it. */
+.engine3d-layer { position: fixed; z-index: 2; }
+.engine-slot { width: 100%; height: 100%; }
+/* Expert view reserves the panel's height; the slot is what holds it open now
+   that the canvas is not in the flow. */
+.panel-body-3d .engine-slot { min-height: 432px; }
 .engine3d-hint {
   position: absolute; bottom: 9px; left: 13px;
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
@@ -720,12 +729,27 @@ body {
   background: var(--bg-2);
   border-top: 1px solid var(--line);
 }
-.stage .engine3d { position: absolute; inset: 0; }
+/* The engine no longer lives in the stage — a slot marks where it goes and the
+   single fixed layer draws over it. See state/engineSlot.ts.
+
+   The bottom inset is the verdict card's lane. FitCamera solves against the
+   canvas it is given, so reserving the space here is what stops the engine
+   being drawn behind the card and cropped by the viewport edge — the framing
+   composes above the card instead of colliding with it. */
+.stage .engine-slot {
+  position: absolute; inset: 0 0 124px 0;
+  /* Beat the generic .engine-slot 100% sizing — with an explicit height the
+     bottom inset is ignored and the reserved lane does nothing. */
+  width: auto; height: auto;
+}
 
 /* ---- the verdict card: the whole pitch in one glance ---- */
 .verdict {
   position: absolute;
   left: 50%; bottom: 52px;
+  /* Above the engine layer (z-index 2), which is fixed and would otherwise
+     paint straight over this card. */
+  z-index: 10;
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: auto 1px auto;
@@ -890,6 +914,9 @@ body {
   position: fixed; inset: 0; z-index: 400;
   background: var(--bg-2);
   overflow-y: auto;
+  /* Without this a scroll that reaches the end of the sheet keeps going into
+     the canvas behind and orbits the camera mid-demo. */
+  overscroll-behavior: contain;
   padding: 22px 16px 48px;
   display: flex; flex-direction: column; align-items: center;
 }

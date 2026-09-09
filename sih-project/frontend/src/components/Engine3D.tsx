@@ -31,7 +31,10 @@ const TARGET: [number, number, number] = [0.16, 0.28, 0];
 /** Half-extents of the engine in scene units: four cylinders on 1.42 spacing
  *  plus the turbo and the prop flange make it a long, fairly flat object. */
 const HALF_W = 3.7;
-const HALF_H = 1.9;
+/* Measured from the frame, not from the model: at 1.9 the sump ran off the
+   bottom of the stage viewport. The camera looks down from +y, so perspective
+   pushes the near underside lower than the model's own half-height suggests. */
+const HALF_H = 2.35;
 
 /**
  * Frame the engine to the viewport it actually has.
