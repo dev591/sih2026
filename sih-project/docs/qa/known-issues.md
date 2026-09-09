@@ -8,33 +8,6 @@ Last reviewed: **2026-09-09**.
 
 ---
 
-## FE-1 · WebGL context lost when toggling Simple ⇄ Expert
-
-**Severity:** cosmetic · **Blocker:** no · **Owner:** frontend
-
-`App.tsx` switches views with a ternary (`{simple ? <SimpleView/> :
-<ExpertGrid/>}`), so React unmounts one subtree and mounts the other. Both
-contain `<Engine3D/>`, so the `<Canvas>` and its WebGL context are destroyed
-and rebuilt on every toggle. Console shows
-`THREE.WebGLRenderer: Context Lost`, and the 3D view is blank for roughly
-two seconds before it recovers on its own.
-
-**Workaround for demo day:** choose your view *before* you start speaking
-and stay in it. The rehearsed script never toggles mid-beat. If a judge asks
-to see the other view, toggle it during a natural pause and keep talking —
-it recovers by itself and needs no intervention.
-
-**Why it is not fixed yet.** The correct fix is a single hoisted `<Canvas>`
-positioned by CSS into whichever view is active, rather than one instance
-per view. The cheap alternative — keeping both views mounted and hiding one
-— is worse here, because the Canvas carries an `EffectComposer` with Bloom
-and SMAA, and two postprocessing pipelines cost more than the bug does.
-The real fix is a layout change to the demo centerpiece and must be
-verified visually before it is trusted. **Do not attempt it in the last
-48 hours before judging.**
-
----
-
 ## FE-2 · Fault Console has no effect while the feed is LIVE
 
 **Severity:** high · **Blocker:** for a live-backend demo only · **Owner:** BE-1, then frontend
@@ -122,3 +95,15 @@ before judging — the risk is not worth the zero benefit.
 | `sigma_generator.py` empty — ρ never normalised to σ units | `3488fa6` |
 | ρ₃ placeholder identical to ρ₁, would double-count Path 1 as Path 4 | `3488fa6` |
 | Post-flight report in the script with no implementation | `e3a236b` |
+| **FE-1** · engine blank for ~8 s on every Simple ⇄ Expert toggle | `a53c192` |
+| Cylinder temperature tags drawing on top of the report | `a53c192` |
+| Scrolling the report orbited the camera behind it | `a53c192` |
+| Engine cropped at the bottom of the stage; verdict card overlapping it | `a53c192` |
+
+**On FE-1, for the record.** It was logged here as "~2 seconds, cosmetic."
+Measured in the browser it was **about eight seconds of blank white**, on the
+view the demo opens in — the entry understated a demo-killer, because it was
+written from reading the code rather than from running it. The console tell
+was the shadow-map init warning appearing once per toggle. Fixed by hoisting
+to a single persistent `<Canvas>`; three consecutive toggles now produce zero
+such warnings. **Lesson worth keeping: time the symptom, do not estimate it.**
