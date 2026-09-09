@@ -10,11 +10,14 @@
 import { useEffect, useMemo, useRef } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import { C } from '../theme';
 import { useMission } from '../state/missionStore';
 import { Panel } from './Panels';
 import { N_CYL } from '../types/telemetry';
 
-const CYL_COLOURS = ['#60a5fa', '#f59e0b', '#34d399', '#a78bfa'];
+/** Per-cylinder series. Darker than the dark-theme originals so each clears
+ *  4.5:1 against a white plot ground — same hue identity, readable ink. */
+const CYL_COLOURS = C.cyl;
 
 interface StripProps {
   title: string;
@@ -68,7 +71,7 @@ export function StripChart({
     if (pickPredicted) {
       series.push({
         label: 'twin',
-        stroke: '#64748b',
+        stroke: C.twin,
         width: 1.2,
         dash: [4, 4],
         points: { show: false },
@@ -84,9 +87,9 @@ export function StripChart({
       scales: { x: { time: false } },
       axes: [
         {
-          stroke: '#475569',
-          grid: { stroke: '#182131', width: 1 },
-          ticks: { stroke: '#233043' },
+          stroke: C.textDim,
+          grid: { stroke: C.line, width: 1 },
+          ticks: { stroke: C.line2 },
           font: '10px ui-monospace, Menlo, monospace',
           // Force whole-second spacing. Without this uPlot picks fractional
           // increments and the labels repeat ("0s 0s 1s 1s") once the window
@@ -95,9 +98,9 @@ export function StripChart({
           values: (_u, vals) => vals.map((v) => `${v.toFixed(0)}s`),
         },
         {
-          stroke: '#475569',
-          grid: { stroke: '#182131', width: 1 },
-          ticks: { stroke: '#233043' },
+          stroke: C.textDim,
+          grid: { stroke: C.line, width: 1 },
+          ticks: { stroke: C.line2 },
           font: '10px ui-monospace, Menlo, monospace',
           size: 52,
         },

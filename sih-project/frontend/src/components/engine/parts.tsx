@@ -18,7 +18,10 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
-import { MAT, N_FINS, CYL_X, thermalRamp, faultColour, exhaustHeat } from './materials';
+import {
+  MAT, N_FINS, CYL_X, thermalRamp, faultColour, faultEmissiveIntensity, exhaustHeat,
+} from './materials';
+import { C } from '../../theme';
 
 // ---------------------------------------------------------------------------
 // Small reusable hardware
@@ -99,7 +102,9 @@ export function CylinderAssembly({
     [cht, chtRampFrom]
   );
   const glow = useMemo(() => faultColour(faultProb, isSensorFault), [faultProb, isSensorFault]);
-  const glowI = 0.06 + 0.94 * anomaly;
+  // Must clear SCENE.bloomThreshold to read as GLOWING rather than merely
+  // tinted — on a light backdrop the threshold sits above the page itself.
+  const glowI = faultEmissiveIntensity(anomaly);
 
   // Fins taper toward the head, as they do on a real air-cooled barrel —
   // the bottom of the barrel is hotter and gets more area.
@@ -112,7 +117,7 @@ export function CylinderAssembly({
     []
   );
 
-  const ring = selected ? '#38bdf8' : hovered ? '#7c8899' : null;
+  const ring = selected ? C.accent : hovered ? '#7c8899' : null;
 
   return (
     <group
@@ -193,6 +198,25 @@ export function CylinderAssembly({
         <meshStandardMaterial {...MAT.steelDark} />
       </mesh>
 
+      {/* ---- fault halo ----
+          A flat disc on the floor under a faulted cylinder, opacity driven by
+          the anomaly score. This is deliberately NOT a postprocessing effect:
+          the glow above depends on bloom clearing a threshold, and on a light
+          backdrop that threshold is delicate. The halo is plain geometry, so
+          the faulted cylinder stays identifiable even if bloom has to be turned
+          down further for a given projector. */}
+      {anomaly > 0.15 && (
+        <mesh position={[0, -1.28, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.95, 48]} />
+          <meshBasicMaterial
+            color={glow}
+            transparent
+            opacity={Math.min(0.42, anomaly * 0.5)}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
+
       {/* ---- selection ring ---- */}
       {ring && (
         <mesh position={[0, 0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
@@ -210,7 +234,9 @@ export function CylinderTag({
   index, count, cht, faultProb, isSensorFault,
 }: { index: number; count: number; cht: number; faultProb: number; isSensorFault: boolean }) {
   const active = faultProb > 0.4;
-  const accent = isSensorFault ? '#22d3ee' : '#fbbf24';
+  // Same tokens the 3D glow uses. These used to be '#22d3ee' / '#fbbf24' typed
+  // by hand, so the tag drew a different amber than the cylinder underneath it.
+  const accent = isSensorFault ? C.sensor : C.warn;
   return (
     <Html position={[CYL_X(index, count), 2.12, 0]} center distanceFactor={4.4}>
       <div
@@ -219,12 +245,14 @@ export function CylinderTag({
           fontSize: 11,
           fontVariantNumeric: 'tabular-nums',
           letterSpacing: '0.04em',
-          color: active ? accent : '#94a3b8',
-          background: 'rgba(8,11,16,0.86)',
+          color: active ? accent : C.textDim,
+          background: active ? C.panel : 'rgba(255,255,255,0.88)',
           padding: '2px 7px',
           borderRadius: 2,
-          border: `1px solid ${active ? accent : '#2b3646'}`,
-          boxShadow: active ? `0 0 12px ${accent}55` : 'none',
+          border: `1px solid ${active ? accent : C.line2}`,
+          boxShadow: active
+            ? `0 0 0 3px ${accent}22, 0 2px 8px rgb(16 32 48 / 0.18)`
+            : '0 1px 3px rgb(16 32 48 / 0.12)',
           whiteSpace: 'nowrap',
           pointerEvents: 'none',
         }}

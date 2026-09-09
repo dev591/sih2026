@@ -6,8 +6,8 @@
  * into a capability.
  */
 
-import { useEffect, useRef } from 'react';
-import { useMission, MISSION_DURATION_S } from '../state/missionStore';
+import { useCallback, useEffect, useRef } from 'react';
+import { useMission, MISSION_DURATION_S, type Drawer } from '../state/missionStore';
 import { SCRIPT_BEATS, SCRIPTED } from '../mock/missionGenerator';
 
 export function Scrubber() {
@@ -19,6 +19,7 @@ export function Scrubber() {
   const togglePlay = useMission((s) => s.togglePlay);
   const setSpeed = useMission((s) => s.setSpeed);
   const restart = useMission((s) => s.restart);
+  const jumpTo = useBeatJump();
 
   const raf = useRef<number>(0);
   const last = useRef<number>(performance.now());
@@ -79,7 +80,7 @@ export function Scrubber() {
               className="beat"
               style={{ left: `${(b.t / MISSION_DURATION_S) * 100}%` }}
               title={`${b.label} — jump to ${b.t}s`}
-              onClick={() => setIndex(b.t)}
+              onClick={() => jumpTo(b.t)}
             />
           ))}
         </div>
@@ -110,10 +111,54 @@ export function Scrubber() {
  * therefore visible at once, and each also has a number key, because under
  * pressure a keystroke beats a small target.
  */
-export function BeatBar() {
+/**
+ * Which drawer each scripted beat needs open.
+ *
+ * In simple mode the panels are behind edge tabs, so jumping to a beat has to
+ * bring up whatever that beat's narration points at — otherwise the presenter
+ * is hunting for a tab mid-sentence. Keyed by beat TIME rather than by index so
+ * it cannot silently fall out of step with SCRIPT_BEATS the way a parallel
+ * array would; beats not listed want the bare engine, which is the point of
+ * beats 1 and 2.
+ *
+ * Follows docs/pitch/demo-script.md — 1:20 isolation, 2:25 the decision, 3:00
+ * the sensor-drift twist where the argument is the ABSENCE of corroborating
+ * residuals, so that one opens the residual heatmap.
+ */
+const BEAT_DRAWER: Record<number, Drawer> = {
+  62: 'faults',    // anomaly crosses, every limit still green
+  95: 'faults',    // isolation: injector fouling, cyl 2
+  120: 'mission',  // warm air mass — cross-engine differential
+  140: 'mission',  // RUL with uncertainty band
+  165: 'mission',  // continue / derate / RTB — the judge drags the altitude
+  200: 'trends',   // CHT sensor drifting; watch the residuals NOT move
+  235: 'faults',   // sensor fault correctly identified
+  260: 'trends',   // unmodelled — twin confidence drops
+};
+
+/**
+ * Jump to a scripted beat. Shared by the chips and by the timeline ticks,
+ * because they are the same ten beats and it would be its own small trap for
+ * one of them to open the drawer and the other not to.
+ */
+function useBeatJump() {
   const setIndex = useMission((s) => s.setIndex);
+  const setDrawer = useMission((s) => s.setDrawer);
+  const simple = useMission((s) => s.mode === 'simple');
+  return useCallback(
+    (t: number) => {
+      setIndex(t);
+      // Only in simple mode — the expert grid already has every panel on screen.
+      if (simple) setDrawer(BEAT_DRAWER[t] ?? null);
+    },
+    [setIndex, setDrawer, simple]
+  );
+}
+
+export function BeatBar() {
   const index = useMission((s) => s.index);
   const onScript = useMission((s) => s.config === SCRIPTED);
+  const jumpTo = useBeatJump();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -122,12 +167,12 @@ export function BeatBar() {
       const n = Number(e.key);
       if (Number.isInteger(n) && n >= 1 && n <= SCRIPT_BEATS.length) {
         e.preventDefault();
-        setIndex(SCRIPT_BEATS[n - 1].t);
+        jumpTo(SCRIPT_BEATS[n - 1].t);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setIndex]);
+  }, [jumpTo]);
 
   // The beats describe the rehearsed mission. In the sandbox they refer to
   // events that are not in the timeline, so showing them would be a lie.
@@ -153,7 +198,7 @@ export function BeatBar() {
           <button
             key={b.t}
             className={`beat-chip${active ? ' beat-chip-on' : ''}`}
-            onClick={() => setIndex(b.t)}
+            onClick={() => jumpTo(b.t)}
             title={`Press ${i + 1} to jump here`}
           >
             <span className="beat-key">{i + 1}</span>

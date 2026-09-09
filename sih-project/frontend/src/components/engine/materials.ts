@@ -11,7 +11,22 @@
  */
 
 import * as THREE from 'three';
+import { SCENE } from '../../theme';
 
+/**
+ * Base metals.
+ *
+ * These are close to the dark-theme originals, because the thing that made the
+ * engine read as a black silhouette on a white page was never the base colours
+ * — it was the missing environment map. A material at metalness 0.95 renders
+ * almost entirely as a reflection of its surroundings, and with nothing to
+ * reflect it goes black. Against a black backdrop that was invisible; against a
+ * white one it is the whole problem. The fix is the studio environment in
+ * Engine3D, not darker paint.
+ *
+ * The genuinely dark materials (cast iron, anodised, rubber) are lifted a little
+ * so they read as very dark GREY rather than as holes cut in the page.
+ */
 export const MAT = {
   /** Sand-cast aluminium — crankcase, heads, rocker covers. Matte, slightly warm. */
   castAlu: {
@@ -39,7 +54,7 @@ export const MAT = {
   },
   /** Cast iron — turbine housing. Nearly black, coarse. */
   castIron: {
-    color: '#2f333a',
+    color: '#3d424a',
     metalness: 0.72,
     roughness: 0.78,
   },
@@ -51,13 +66,13 @@ export const MAT = {
   },
   /** Anodised black — intake plenum, brackets. */
   anodised: {
-    color: '#23272e',
+    color: '#31363e',
     metalness: 0.62,
     roughness: 0.48,
   },
   /** Rubber / composite — hoses, mounts. */
   rubber: {
-    color: '#191c21',
+    color: '#2a2e34',
     metalness: 0.05,
     roughness: 0.92,
   },
@@ -92,9 +107,26 @@ export function thermalRamp(cht: number, lo = 150, hi = 205): THREE.Color {
  */
 export function faultColour(p: number, isSensor: boolean): THREE.Color {
   return new THREE.Color('#000000').lerp(
-    new THREE.Color(isSensor ? '#22d3ee' : '#f59e0b'),
+    new THREE.Color(isSensor ? SCENE.sensorGlow : SCENE.faultGlow),
     THREE.MathUtils.clamp(p, 0, 1)
   );
+}
+
+/**
+ * Emissive intensity for a faulted cylinder.
+ *
+ * Bloom only picks up what exceeds SCENE.bloomThreshold, and on a light backdrop
+ * that threshold has to sit above the page itself (see Engine3D). So a fault has
+ * to be driven past 1.0 to glow at all — where on the old black ground anything
+ * over ~0.6 would do.
+ *
+ * The curve stays sub-threshold until the anomaly is real, so a healthy engine
+ * never glows. That restraint is the point: a colour that is always on carries
+ * no information when a fault finally arrives.
+ */
+export function faultEmissiveIntensity(anomaly: number): number {
+  const a = THREE.MathUtils.clamp(anomaly, 0, 1);
+  return 0.05 + a * a * SCENE.faultEmissive;
 }
 
 /**

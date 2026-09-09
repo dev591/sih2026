@@ -172,7 +172,7 @@ export interface FaultConfig {
 export const SCRIPTED: FaultConfig = {
   injector: { startT: 40, cyl: 1, rate: 0.045 },
   chtSensor: { startT: 200, cyl: 2, rate: 24 },
-  unmodelled: { startT: 258, rate: 0.62 },
+  unmodelled: { startT: T_UNMODELLED_START, rate: 0.62 },
   warmAirMass: true,
 };
 

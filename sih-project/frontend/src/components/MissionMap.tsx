@@ -19,8 +19,9 @@
  */
 
 import { useMemo, useState } from 'react';
+import { C } from '../theme';
 import { useCurrentTick, useMission } from '../state/missionStore';
-import { Panel } from './Panels';
+import { Note, Panel } from './Panels';
 
 // ---------------------------------------------------------------------------
 // A racetrack loiter pattern — which is what these missions actually are.
@@ -57,10 +58,10 @@ const ROUTE: Leg[] = [
 
 function riskColour(p: number): string {
   // p is probability of completing THIS segment within limits.
-  if (p > 0.95) return '#34d399';
-  if (p > 0.85) return '#a3d977';
-  if (p > 0.70) return '#f59e0b';
-  return '#f43f5e';
+  if (p > 0.95) return C.ok;
+  if (p > 0.85) return '#65a30d';
+  if (p > 0.70) return C.warn;
+  return C.alert;
 }
 
 export function MissionMap() {
@@ -133,10 +134,10 @@ export function MissionMap() {
       <svg viewBox={`0 0 ${W} ${H}`} className="mapsvg" role="img" aria-label="Mission route coloured by predicted risk">
         <defs>
           <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
-            <path d="M26 0 L0 0 0 26" fill="none" stroke="#141c28" strokeWidth="1" />
+            <path d="M26 0 L0 0 0 26" fill="none" stroke="var(--line)" strokeWidth="1" />
           </pattern>
         </defs>
-        <rect width={W} height={H} fill="#080c12" />
+        <rect width={W} height={H} fill="var(--void)" />
         <rect width={W} height={H} fill="url(#grid)" />
 
         {/* route, coloured per segment */}
@@ -147,7 +148,7 @@ export function MissionMap() {
         {/* waypoints */}
         {ROUTE.filter((r) => r.label).map((r, i) => (
           <g key={i}>
-            <circle cx={r.x} cy={r.y} r={3.4} fill="#0b1017" stroke="#64748b" strokeWidth={1.4} />
+            <circle cx={r.x} cy={r.y} r={3.4} fill="var(--panel)" stroke="var(--text-dim)" strokeWidth={1.4} />
             <text x={r.x + 7} y={r.y + 3} className="maplabel">{r.label}</text>
           </g>
         ))}
@@ -156,15 +157,15 @@ export function MissionMap() {
         <g>
           <line
             x1={pnrPoint.x} y1={pnrPoint.y - 11} x2={pnrPoint.x} y2={pnrPoint.y + 11}
-            stroke="#e879f9" strokeWidth={1.8} strokeDasharray="3 2"
+            stroke="var(--pnr)" strokeWidth={1.8} strokeDasharray="3 2"
           />
-          <circle cx={pnrPoint.x} cy={pnrPoint.y} r={4} fill="#0b1017" stroke="#e879f9" strokeWidth={1.6} />
+          <circle cx={pnrPoint.x} cy={pnrPoint.y} r={4} fill="var(--panel)" stroke="var(--pnr)" strokeWidth={1.6} />
           <text x={pnrPoint.x + 8} y={pnrPoint.y - 13} className="maplabel maplabel-pnr">PNR</text>
         </g>
 
         {/* aircraft, at the head of the flown portion */}
-        <circle cx={ROUTE[3].x} cy={ROUTE[3].y} r={3} fill="#38bdf8" />
-        <circle cx={ROUTE[3].x} cy={ROUTE[3].y} r={7} fill="none" stroke="#38bdf8" strokeWidth={1} opacity={0.45} />
+        <circle cx={ROUTE[3].x} cy={ROUTE[3].y} r={3} fill="var(--accent)" />
+        <circle cx={ROUTE[3].x} cy={ROUTE[3].y} r={7} fill="none" stroke="var(--accent)" strokeWidth={1} opacity={0.45} />
       </svg>
 
       {/* ---- the interaction that matters ---- */}
@@ -214,7 +215,7 @@ export function MissionMap() {
         </button>
       )}
 
-      <p className="note">
+      <Note>
         {alt > CRITICAL_FT ? (
           <>
             <strong>{(alt - CRITICAL_FT).toLocaleString()} ft above critical altitude.</strong>{' '}
@@ -231,7 +232,7 @@ export function MissionMap() {
             happen on station.
           </>
         )}
-      </p>
+      </Note>
     </Panel>
   );
 }

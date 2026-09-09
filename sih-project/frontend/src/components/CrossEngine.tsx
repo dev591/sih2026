@@ -24,7 +24,7 @@
 
 import { useMemo } from 'react';
 import { useMission } from '../state/missionStore';
-import { Panel } from './Panels';
+import { Note, Panel } from './Panels';
 import { N_CYL } from '../types/telemetry';
 
 interface Channel {
@@ -193,7 +193,7 @@ export function CrossEnginePanel() {
             <span className="cross-spark-tol">build spread ±{worst.tol}{worst.unit}</span>
           </div>
           <svg viewBox={`0 0 ${history.length} 40`} preserveAspectRatio="none" className="cross-svg">
-            <line x1={0} y1={20} x2={history.length} y2={20} stroke="#243043" strokeWidth={0.5} />
+            <line x1={0} y1={20} x2={history.length} y2={20} stroke="var(--line-2)" strokeWidth={0.5} />
             <polyline
               points={history
                 .map((v, i) => {
@@ -208,14 +208,14 @@ export function CrossEnginePanel() {
         </div>
       )}
 
-      <p className="note">
+      <Note>
         Common-mode variation — ambient, fuel batch, density, altitude — appears
         identically on both engines and cancels exactly, so the differential's
         noise floor sits far below either absolute channel and slow drifts show
         up earlier. <strong>Both engines drifting together is the environment;
         one drifting alone is that engine.</strong> Every team that models a
         single engine forfeits this.
-      </p>
+      </Note>
     </Panel>
   );
 }

@@ -9,6 +9,7 @@ import { FaultConsole, InjectedTruth } from './components/FaultConsole';
 import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
+import { SimpleView } from './components/SimpleView';
 import { useCurrentTick, useMission } from './state/missionStore';
 import { ENGINES } from './config/engines';
 import './App.css';
@@ -104,9 +105,78 @@ function EngineSubtitle() {
   );
 }
 
-export default function App() {
+/**
+ * Simple ⇄ expert. The label names the destination, not the current state.
+ */
+function ModeToggle() {
+  const mode = useMission((s) => s.mode);
+  const toggleMode = useMission((s) => s.toggleMode);
   return (
-    <div className="app">
+    <button
+      className={`mode-btn${mode === 'expert' ? ' mode-btn-on' : ''}`}
+      onClick={toggleMode}
+      title={
+        mode === 'simple'
+          ? 'Show every instrument at once'
+          : 'Back to the engine and one verdict'
+      }
+    >
+      {mode === 'simple' ? 'EXPERT ▸' : '◂ SIMPLE'}
+    </button>
+  );
+}
+
+/**
+ * The full instrument grid — fourteen panels, three columns.
+ *
+ * Lifted OUT of App unchanged rather than rebuilt, deliberately. This is the
+ * view that has been rehearsed against, and demo-script.md's fallback table
+ * assumes each layer can still be shown on its own. Keeping it byte-identical
+ * means the simple view can never cost us a panel mid-demo.
+ */
+function ExpertGrid() {
+  return (
+    <main className="grid">
+      <div className="col col-left">
+        <FaultConsole />
+        <LimitsPanel />
+        <DiagnosisPanel />
+        <TwinConfidencePanel />
+        <CrossEnginePanel />
+        <RulPanel />
+      </div>
+
+      <div className="col col-mid">
+        <section className="panel panel-3d">
+          <header className="panel-head">
+            <span className="panel-title">Engine twin</span>
+            <span className="panel-sub">live state · per-cylinder</span>
+          </header>
+          <div className="panel-body panel-body-3d">
+            <Engine3D />
+          </div>
+        </section>
+        <EgtChart />
+        <ChtChart />
+      </div>
+
+      <div className="col col-right">
+        <MissionPanel />
+        <MissionMap />
+        <ResidualHeatmap />
+        <HealthParamsPanel />
+        <VirtualSensorPanel />
+      </div>
+    </main>
+  );
+}
+
+export default function App() {
+  const mode = useMission((s) => s.mode);
+  const simple = mode === 'simple';
+
+  return (
+    <div className={`app app-${mode}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">प्रमाण</span>
@@ -116,46 +186,19 @@ export default function App() {
         <div className="brand-right">
           <EngineSelector />
           <SourceBadge />
+          <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>
       </header>
 
-      <StatusBar />
+      {/* The nine-readout telemetry ribbon is expert-only: in simple mode it is
+          nine numbers competing with the one sentence that matters. The verdict
+          card carries the status word instead. */}
+      {!simple && <StatusBar />}
       <InjectedTruth />
       <BeatBar />
 
-      <main className="grid">
-        <div className="col col-left">
-          <FaultConsole />
-          <LimitsPanel />
-          <DiagnosisPanel />
-          <TwinConfidencePanel />
-          <CrossEnginePanel />
-          <RulPanel />
-        </div>
-
-        <div className="col col-mid">
-          <section className="panel panel-3d">
-            <header className="panel-head">
-              <span className="panel-title">Engine twin</span>
-              <span className="panel-sub">live state · per-cylinder</span>
-            </header>
-            <div className="panel-body panel-body-3d">
-              <Engine3D />
-            </div>
-          </section>
-          <EgtChart />
-          <ChtChart />
-        </div>
-
-        <div className="col col-right">
-          <MissionPanel />
-          <MissionMap />
-          <ResidualHeatmap />
-          <HealthParamsPanel />
-          <VirtualSensorPanel />
-        </div>
-      </main>
+      {simple ? <SimpleView /> : <ExpertGrid />}
 
       <Scrubber />
       <ExplainDrawer />

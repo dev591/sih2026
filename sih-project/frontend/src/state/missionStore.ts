@@ -23,8 +23,26 @@ const MISSION = generateMission();
 /** How many live frames we retain for the scrubber and the heatmap window. */
 const LIVE_BUFFER = 900;
 
+/** Which slide-out panel group is showing in simple mode. */
+export type Drawer = 'faults' | 'mission' | 'trends';
+export type Mode = 'simple' | 'expert';
+
+const MODE_KEY = 'pramana.mode';
+
+/** Persisted so a rehearsal doesn't reset the view between reloads. */
+function storedMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'expert' ? 'expert' : 'simple';
+  } catch {
+    return 'simple';
+  }
+}
+
 interface MissionState {
   ticks: MissionTick[];
+  /** Active engine profile. Everything downstream — geometry, limits, critical
+   *  altitude, which parity paths exist — is derived from this. */
+  engine: EngineProfile;
   index: number;
   playing: boolean;
   speed: number;
@@ -42,6 +60,11 @@ interface MissionState {
   /** True while a fault has been injected but not yet revealed on screen —
    *  so a judge can choose one without the presenter seeing which. */
   blind: boolean;
+  /** Simple = the engine and one verdict. Expert = the full instrument grid.
+   *  Simple is the default because fourteen panels at once emphasise nothing. */
+  mode: Mode;
+  /** Which drawer is slid out over the simple view. null = none. */
+  drawer: Drawer | null;
 
   tick: () => MissionTick;
   setIndex: (i: number) => void;
@@ -59,6 +82,9 @@ interface MissionState {
   applyConfig: (cfg: FaultConfig, opts?: { seekTo?: number; blind?: boolean }) => void;
   reveal: () => void;
   setEngine: (id: string) => void;
+  setMode: (m: Mode) => void;
+  toggleMode: () => void;
+  setDrawer: (d: Drawer | null) => void;
   setFeed: (source: FeedSource, error: string | null, frames: number) => void;
   /** Jump straight to a scripted beat — used by the demo shortcut bar. */
   seekTo: (t: number) => void;
@@ -77,6 +103,8 @@ export const useMission = create<MissionState>((set, get) => ({
   config: SCRIPTED,
   blind: false,
   engine: VRDE_180,
+  mode: storedMode(),
+  drawer: null,
 
   tick: () => {
     const { ticks, index } = get();
@@ -118,6 +146,15 @@ export const useMission = create<MissionState>((set, get) => ({
   },
 
   reveal: () => set({ blind: false }),
+
+  setMode: (mode) => {
+    try { localStorage.setItem(MODE_KEY, mode); } catch { /* private window */ }
+    // Drawers belong to the simple view; leaving one open behind the grid would
+    // cover the right-hand column.
+    set({ mode, drawer: null });
+  },
+  toggleMode: () => get().setMode(get().mode === 'simple' ? 'expert' : 'simple'),
+  setDrawer: (drawer) => set({ drawer }),
 
   /** Swap the engine. Everything downstream — geometry, limits, critical
    *  altitude, which parity paths exist — follows from the profile, so this

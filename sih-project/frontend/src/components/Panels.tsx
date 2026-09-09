@@ -6,6 +6,7 @@
  * QGroundControl vocabulary, about ten years newer.
  */
 
+import type { ReactNode } from 'react';
 import { useCurrentTick, useMission } from '../state/missionStore';
 import {
   FAULT_LABELS, N_CYL, RESIDUAL_ROWS, residualRow,
@@ -14,6 +15,29 @@ import {
 // ---------------------------------------------------------------------------
 // Shared shell
 // ---------------------------------------------------------------------------
+
+/**
+ * Explanatory prose, collapsed by default.
+ *
+ * Nearly every panel carries a paragraph explaining WHY its number means what
+ * it means, and those paragraphs are load-bearing — they are most of what
+ * separates this from a dashboard that merely draws telemetry, and they are the
+ * answers to the questions a judge actually asks.
+ *
+ * But eight of them open at once is a wall of 10px grey text, and the effect is
+ * that none of them get read. Collapsed, the panel reads as instruments; one
+ * click and the argument is there when it is wanted. Native <details>, so it
+ * costs no state and keyboard/screen-reader behaviour comes free.
+ */
+export function Note({ children }: { children: ReactNode }) {
+  return (
+    <details className="note note-fold">
+      <summary className="note-sum">Why this matters</summary>
+      {children}
+    </details>
+  );
+}
+
 export function Panel({
   title, subtitle, children, flag,
 }: {
@@ -75,9 +99,17 @@ export function ResidualHeatmap() {
     const a = Math.min(1, Math.abs(v) / 4);
     // Positive deviation amber, negative cyan — sign carries information,
     // and the incidence matrix is read by sign as much as magnitude.
+    //
+    // The alpha floor is 0.16 rather than 0.06: on the old black ground a
+    // near-zero residual at 6% alpha still read as a faintly warm cell, but on
+    // white it is indistinguishable from the page, and a heatmap whose quiet
+    // cells are invisible stops showing that the quiet channels ARE quiet —
+    // which is half of what isolation is read from. The ramp is squared so the
+    // floor does not wash the whole grid into mid-tone.
+    const alpha = 0.16 + a * a * 0.84;
     return v >= 0
-      ? `rgba(245,158,11,${0.06 + a * 0.94})`
-      : `rgba(34,211,238,${0.06 + a * 0.94})`;
+      ? `color-mix(in srgb, var(--warn) ${(alpha * 100).toFixed(1)}%, var(--panel))`
+      : `color-mix(in srgb, var(--sensor) ${(alpha * 100).toFixed(1)}%, var(--panel))`;
   };
 
   return (
@@ -102,12 +134,12 @@ export function ResidualHeatmap() {
           </div>
         ))}
       </div>
-      <p className="note">
+      <Note>
         Nominally zero and operating-point invariant by construction — which is
         why the detector does not fire every time the throttle moves.
         ρ₃ is <strong>null</strong>: an unthrottled FADEC aero-diesel has no
         metering restriction, so Path 4 does not exist on this engine.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -199,10 +231,10 @@ export function DiagnosisPanel() {
           Explain this diagnosis →
         </button>
       )}
-      <p className="note">
+      <Note>
         Threshold is the 99.5th percentile of reconstruction error on held-out
         healthy data — never a hand-picked constant.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -248,10 +280,10 @@ export function HealthParamsPanel() {
           );
         })}
       </div>
-      <p className="note">
+      <Note>
         These <em>are</em> the health indicators — physical quantities an engineer
         can accept or dispute, each with a covariance. Not a health score.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -298,10 +330,10 @@ export function RulPanel() {
           tone="warn"
         />
       </div>
-      <p className="note">
+      <Note>
         Two independent estimates, and we advise on the conservative one.
         {rul.heads_disagree && ' Heads disagree beyond the predictive interval — surfaced as a warning in its own right.'}
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -337,11 +369,11 @@ export function MissionPanel() {
         <Metric label="Boost ceiling" value={mission.recommended_boost_hPa.toFixed(0)} unit="hPa" />
         <Metric label="Power ceiling" value={mission.recommended_power_pct.toFixed(0)} unit="%" />
       </div>
-      <p className="note">
+      <Note>
         Point of no return computed from remaining fuel and the <em>degraded</em>
         BSFC, not the book figure. Reliability advice that ignores mission value
         is ignored advice.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -400,7 +432,7 @@ export function LimitsPanel() {
       <div className={`limits-verdict tone-${health.limits_state === 'green' ? 'ok' : 'warn'}`}>
         {health.limits_state === 'green' ? 'ALL PARAMETERS GREEN' : health.limits_state.toUpperCase()}
       </div>
-      <p className="note">
+      <Note>
         Limits are read from the <strong>{engine.short}</strong> profile, not
         hardcoded — {engine.limits.every((l) => l.provenance === 'published')
           ? 'all published and citable'
@@ -408,7 +440,7 @@ export function LimitsPanel() {
         Note the EGT row is absent: the type certificate for this class publishes
         <strong> no EGT limit at all</strong>. EGT is a trend parameter, not a
         redline parameter — a threshold system has no way to use it.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -436,10 +468,10 @@ export function VirtualSensorPanel() {
           </div>
         ))}
       </div>
-      <p className="note">
+      <Note>
         None of these are instrumented on the aircraft. They are recoverable
         because the same quantity is reachable along several independent paths.
-      </p>
+      </Note>
     </Panel>
   );
 }
@@ -503,14 +535,14 @@ export function TwinConfidencePanel() {
         <Metric label="rank F" value={`${novelty.effective_rank}/11`} tone="dim" />
       </div>
 
-      <p className="note">
+      <Note>
         The fault signatures span {novelty.effective_rank} of 11 residual
         dimensions, leaving {novelty.null_space_dim} in which a fault we have
         never modelled can still be seen. ν is weighted by residual
         significance — below the noise floor there is nothing to explain, so
         confidence is full. A tool that never says
         <strong> "I don't know"</strong> cannot be trusted when it does answer.
-      </p>
+      </Note>
     </Panel>
   );
 }
