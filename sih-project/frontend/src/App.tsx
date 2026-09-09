@@ -9,6 +9,7 @@ import { FaultConsole, InjectedTruth } from './components/FaultConsole';
 import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
+import { FlightReport } from './components/FlightReport';
 import { SimpleView } from './components/SimpleView';
 import { useCurrentTick, useMission } from './state/missionStore';
 import { ENGINES } from './config/engines';
@@ -106,6 +107,23 @@ function EngineSubtitle() {
 }
 
 /**
+ * Opens the post-flight report for the frame currently under the scrubber —
+ * demo-script.md's 3:30 beat. Scrub back to detection, then print.
+ */
+function ReportButton() {
+  const setReportOpen = useMission((s) => s.setReportOpen);
+  return (
+    <button
+      className="mode-btn"
+      onClick={() => setReportOpen(true)}
+      title="Post-flight report for the frame under the scrubber"
+    >
+      REPORT
+    </button>
+  );
+}
+
+/**
  * Simple ⇄ expert. The label names the destination, not the current state.
  */
 function ModeToggle() {
@@ -176,6 +194,9 @@ export default function App() {
   const simple = mode === 'simple';
 
   return (
+    // The report is a SIBLING of .app, not a child: printing hides .app
+    // entirely and lets the report stand alone as the page.
+    <>
     <div className={`app app-${mode}`}>
       <header className="topbar">
         <div className="brand">
@@ -186,6 +207,7 @@ export default function App() {
         <div className="brand-right">
           <EngineSelector />
           <SourceBadge />
+          <ReportButton />
           <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>
@@ -203,5 +225,7 @@ export default function App() {
       <Scrubber />
       <ExplainDrawer />
     </div>
+    <FlightReport />
+    </>
   );
 }
