@@ -7,6 +7,40 @@ one push, tonight, to a finished backend. No partial credit for "started."
 
 ---
 
+## UPDATE — read this before §1, it changes what's actually left
+
+You pushed your own MVEM rewrite and fault-injection wiring (`0a1c5d5`,
+`47edc41`) in parallel with this document being written, from the same base.
+**Both were reviewed by running them, not by reading them**, against the same
+six gates §0 describes. Full honesty, both directions:
+
+- **Your fault-injection wiring — kept, merged in, verified live.** The
+  WebSocket receive loop, `twin/faults.py`'s six faults, per-connection fault
+  state, and the frontend `feed.send()` wiring are **all in `day0-foundation`
+  now** (merge commit after `47edc41`). Tested end-to-end over the actual
+  socket tonight: injected `injector` fault on cylinder 2, watched `egt_C[1]`
+  move and `ρ₆₋₉[1]` read −5.26σ within 20 seconds. This is good work —
+  **§1 below is done, do not redo it.**
+- **Your MVEM/compressor rewrite — not kept.** Scored 1/6 on `gates_check.py`
+  (26% rated power at the actual 18kft/72% cruise point, oil pressure still
+  a hardcoded constant, ρ₁/ρ₅ still on the noise floor). Your commit's own
+  quoted number — 137.5 kW — was measured at sea-level-100%-throttle, the
+  easy case; the gates test the actual demo condition, which is harder. Your
+  `verify.py` also didn't run on a fresh checkout (`UnicodeDecodeError` from
+  a non-UTF-8 character in `compressor_map.csv` — worth knowing for next
+  time: a script that "passes" on your machine but was never run on a clean
+  clone hasn't actually been verified). §0's physics — Ellipse compressor,
+  kinetic-energy turbo, wastegate, oil model — is what's live, calibrated
+  against the same six gates your own commit was checked against.
+
+**What this means for tonight: skip §1 entirely, it's done.** Start at §2
+(the remaining four faults + the four new sensor faults — you have six of
+ten). §3 (damage integrator), §4 (dataset regeneration — **do this against
+the current physics, not your reverted version**), §5 (CAN, if time remains)
+are all still fully open, unchanged from below.
+
+---
+
 ## 0. What changed under you tonight — read this before touching `mvem.py`
 
 Your Day-1 air path was structurally collapsed (turbo pinned at its floor,
@@ -50,7 +84,7 @@ Run `gates_check.py` again after you're done. It must still be 6/6.
 
 ---
 
-## 1. The WebSocket receive loop — do this first, it unblocks the frontend
+## 1. The WebSocket receive loop — ✅ DONE, merged from your own push, skip to §2
 
 **File:** `backend/main.py`.
 
