@@ -72,6 +72,12 @@ class TelemetryFeed {
     return () => this.statusHandlers.delete(h);
   }
 
+  send(msg: any) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.status.source === 'live') {
+      this.ws.send(JSON.stringify(msg));
+    }
+  }
+
   getStatus() {
     return this.status;
   }

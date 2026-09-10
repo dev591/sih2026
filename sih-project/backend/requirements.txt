@@ -1,11 +1,12 @@
-numpy==1.26.4
-scipy==1.13.0
-pandas==2.2.2
-pyarrow==16.1.0
-torch==2.3.1
-scikit-learn==1.5.0
-matplotlib==3.9.0
-jupyter==1.0.0
-h5py==3.11.0
-tqdm==4.66.4
-pyyaml==6.0.1
+# PRAMANA backend dependencies
+# Install: pip install -r requirements.txt
+
+fastapi==0.141.1
+uvicorn==0.52.4
+numpy==2.5.3
+PyYAML==6.0.3
+websockets==17.1
+
+# Optional — needed for data/healthy_flights/*.parquet (BE-2 training data)
+# pandas>=2.0
+# pyarrow>=14.0
