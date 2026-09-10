@@ -165,7 +165,7 @@ def test_fault_isolation(cfg):
 
     fc_inj = {"injector": {"startT": 0.0, "cyl": 1, "rate": 0.5}}
     p_faulted, _, _ = apply_fault_config(
-        120.0, fc_inj, nom, fresh_sensor_biases(N), 0.0
+        120.0, fc_inj, nom, fresh_sensor_biases(N), 0.0, 18000.0
     )
 
     for _ in range(5):
@@ -195,7 +195,7 @@ def test_fault_isolation(cfg):
 
     fc_cht = {"chtSensor": {"startT": 0.0, "cyl": 2, "rate": 10.0}}
     _, biased, _ = apply_fault_config(
-        60.0, fc_cht, nom, fresh_sensor_biases(N), 0.0
+        60.0, fc_cht, nom, fresh_sensor_biases(N), 0.0, 18000.0
     )
 
     m_clean  = MeasurementModel(seed=1).measure(out_s, add_noise=False)
@@ -219,7 +219,7 @@ def test_fault_isolation(cfg):
     # ── 4c. EGT sensor fault: same asymmetry as CHT ───────────────────────
     fc_egt = {"egtSensor": {"startT": 0.0, "cyl": 3, "rate": 8.0}}
     _, biased_e, _ = apply_fault_config(
-        60.0, fc_egt, nom, fresh_sensor_biases(N), 0.0
+        60.0, fc_egt, nom, fresh_sensor_biases(N), 0.0, 18000.0
     )
 
     m_clean_e  = MeasurementModel(seed=2).measure(out_s, add_noise=False)
@@ -247,7 +247,7 @@ def test_fault_isolation(cfg):
     rho_h  = compute_residuals(m_tb_h, p_tb_h, cfg, sigma_vec=None)
 
     fc_tb = {"turbo": {"startT": 0.0, "rate": 0.5}}
-    p_tb_f, _, _ = apply_fault_config(120.0, fc_tb, nom, fresh_sensor_biases(N), 0.0)
+    p_tb_f, _, _ = apply_fault_config(120.0, fc_tb, nom, fresh_sensor_biases(N), 0.0, 18000.0)
 
     for _ in range(5):
         plant_tb.step(1.0, p_tb_f, atm, 72.0)
@@ -271,7 +271,7 @@ def test_fault_isolation(cfg):
     rpm_healthy = plant_br.get_outputs()["rpm"]
 
     fc_br = {"bearing": {"startT": 0.0, "rate": 0.3}}
-    p_br, _, _ = apply_fault_config(120.0, fc_br, nom, fresh_sensor_biases(N), 0.0)
+    p_br, _, _ = apply_fault_config(120.0, fc_br, nom, fresh_sensor_biases(N), 0.0, 18000.0)
 
     for _ in range(10):
         plant_br.step(1.0, p_br, atm, 72.0)

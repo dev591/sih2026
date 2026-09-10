@@ -159,9 +159,16 @@ export interface FaultConfig {
   turbo?: FaultSpec;         // rate = fraction of eta_c lost per minute
   cooling?: FaultSpec;       // rate = fraction of hA lost per minute
   bearing?: FaultSpec;       // rate = friction fraction gained per minute
+  ringWear?: FaultSpec;      // rate = fraction of eta_v lost per minute
+  oilLeak?: FaultSpec;       // rate = fraction of pump flow lost per minute
+  misfire?: FaultSpec;       // rate = probability of a skipped firing event, 0-1
+  detonation?: FaultSpec;    // rate = knock severity 0-1
+  fuelFilter?: FaultSpec;    // rate = fraction of fuel rail capacity lost per minute
   /** INSTRUMENTATION faults — these change only what the sensor REPORTS */
   chtSensor?: FaultSpec;     // rate = degC per minute of bias
   egtSensor?: FaultSpec;     // rate = degC per minute of bias
+  mapSensor?: FaultSpec;     // rate = hPa per minute of bias
+  lambdaSensor?: FaultSpec;  // rate = lambda units per minute of bias
   /** deliberately outside the fault library, for the novelty detector */
   unmodelled?: FaultSpec;    // rate = sigma per second along the null space
   /** common-mode: affects BOTH engines, so it must cancel in the differential */

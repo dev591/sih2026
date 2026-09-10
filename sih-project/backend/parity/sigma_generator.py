@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parity.residuals import compute_residuals
 from twin.atmosphere import isa
+from twin.faults import apply_fault_config, fresh_sensor_biases
+from twin.damage import DamageIntegrator
 from twin.measurement import MeasurementModel
 from twin.mvem import MVEM
 from twin.profiles import load_engine_profile
@@ -65,19 +67,23 @@ DT                    = 1.0
 def collect_raw_rho(cfg: dict) -> np.ndarray:
     """Sample raw ρ across the operating envelope with a healthy engine."""
     nominal_params = {
-        "cd_inj":      [1.0] * cfg["geometry"]["cylinders"],
-        "eta_v_scale": 1.0,
-        "eta_c_scale": 1.0,
-        "hA_scale":    1.0,
+        "cd_inj":       [1.0] * cfg["geometry"]["cylinders"],
+        "eta_v_scale":  1.0,
+        "eta_c_scale":  1.0,
+        "hA_scale":     1.0,
         "f_fric_scale": 1.0,
+        "oil_pump_scale": 1.0,
+        "fuel_rail_scale": 1.0,
+        "misfire_prob":  [0.0] * cfg["geometry"]["cylinders"],
+        "detonation_sev": [0.0] * cfg["geometry"]["cylinders"],
     }
     samples = []
 
     for altitude_ft, throttle_pct in OPERATING_POINTS:
         atm = isa(altitude_ft, isa_offset_K=0.0)
 
-        plant        = MVEM(cfg)
-        twin         = MVEM(cfg)
+        plant        = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
+        twin         = MVEM(cfg, seed=999)
         measure_plant = MeasurementModel(seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
         measure_twin  = MeasurementModel(seed=999)
 
@@ -149,17 +155,22 @@ def write_healthy_dataset(cfg: dict, out_dir: Path) -> None:
     engine would give BE-2 a pathological healthy baseline.
     """
     nominal_params = {
-        "cd_inj":      [1.0] * cfg["geometry"]["cylinders"],
-        "eta_v_scale": 1.0,
-        "eta_c_scale": 1.0,
-        "hA_scale":    1.0,
+        "cd_inj":       [1.0] * cfg["geometry"]["cylinders"],
+        "eta_v_scale":  1.0,
+        "eta_c_scale":  1.0,
+        "hA_scale":     1.0,
         "f_fric_scale": 1.0,
+        "oil_pump_scale": 1.0,
+        "fuel_rail_scale": 1.0,
+        "misfire_prob":  [0.0] * cfg["geometry"]["cylinders"],
+        "detonation_sev": [0.0] * cfg["geometry"]["cylinders"],
     }
     rows: list[dict] = []
 
     for altitude_ft, throttle_pct in OPERATING_POINTS:
         atm = isa(altitude_ft, isa_offset_K=0.0)
-        plant = MVEM(cfg);  twin = MVEM(cfg)
+        plant = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
+        twin = MVEM(cfg, seed=999)
         mp = MeasurementModel(seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
         mt = MeasurementModel(seed=999)
 
@@ -220,6 +231,160 @@ def write_healthy_dataset(cfg: dict, out_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fault-run dataset generation for BE-2 (Directive §4)
+# ---------------------------------------------------------------------------
+
+FAULT_SCENARIOS = [
+    {"name": "injector_cyl1",  "config": {"injector":  {"startT": 0, "cyl": 1, "rate": 0.045}}},
+    {"name": "injector_cyl3",  "config": {"injector":  {"startT": 0, "cyl": 3, "rate": 0.060}}},
+    {"name": "turbo_degrade",  "config": {"turbo":     {"startT": 0, "rate": 0.040}}},
+    {"name": "cooling_foul",   "config": {"cooling":   {"startT": 0, "rate": 0.035}}},
+    {"name": "bearing_wear",   "config": {"bearing":   {"startT": 0, "rate": 0.050}}},
+    {"name": "ring_wear",      "config": {"ringWear":  {"startT": 0, "rate": 0.040}}},
+    {"name": "oil_leak",       "config": {"oilLeak":   {"startT": 0, "rate": 0.045}}},
+    {"name": "fuel_filter",    "config": {"fuelFilter":{"startT": 0, "rate": 0.035}}},
+    {"name": "misfire_cyl2",   "config": {"misfire":   {"startT": 0, "cyl": 2, "rate": 0.30}}},
+    {"name": "detonation_cyl0","config": {"detonation":{"startT": 0, "cyl": 0, "rate": 0.50}}},
+]
+
+FAULT_RUN_DURATION_S = 300     # 5-minute runs, matching demo script length
+FAULT_ALTITUDE_FT    = 18000   # Demo cruise altitude
+FAULT_THROTTLE_PCT   = 72      # Demo cruise throttle
+
+
+def write_fault_dataset(cfg: dict, out_dir: Path) -> None:
+    """
+    Generate one labelled run per fault scenario.
+
+    Each row contains full telemetry + residuals + ground-truth D and RUL_h
+    from the damage integrator. This is what makes M3's RUL head trainable
+    on real labels.
+    """
+    n_cyl = cfg["geometry"]["cylinders"]
+    nominal_params = {
+        "cd_inj":       [1.0] * n_cyl,
+        "eta_v_scale":  1.0,
+        "eta_c_scale":  1.0,
+        "hA_scale":     1.0,
+        "f_fric_scale": 1.0,
+        "oil_pump_scale": 1.0,
+        "fuel_rail_scale": 1.0,
+        "misfire_prob":  [0.0] * n_cyl,
+        "detonation_sev": [0.0] * n_cyl,
+    }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for scenario in FAULT_SCENARIOS:
+        name = scenario["name"]
+        fault_config = scenario["config"]
+        print(f"  Generating fault run: {name} ...")
+
+        plant = MVEM(cfg, seed=42)
+        twin  = MVEM(cfg, seed=43)
+        mp = MeasurementModel(seed=42)
+        mt = MeasurementModel(seed=999)
+        damage = DamageIntegrator()
+
+        atm = isa(FAULT_ALTITUDE_FT, isa_offset_K=0.0)
+
+        # Warm up to steady state
+        for _ in range(STEPS_TO_STEADY_STATE):
+            plant.step(DT, nominal_params, atm, FAULT_THROTTLE_PCT)
+            twin.step(DT, nominal_params, atm, FAULT_THROTTLE_PCT)
+
+        rows: list[dict] = []
+        sigma_cfg_path = Path(__file__).resolve().parent.parent / "config" / "sigma_vector.json"
+        sigma_vec = None
+        if sigma_cfg_path.exists():
+            with open(sigma_cfg_path) as f:
+                sigma_vec = json.load(f)
+
+        for step_i in range(FAULT_RUN_DURATION_S):
+            t = float(step_i)
+
+            # Apply fault ramp to plant params
+            import copy
+            faulted_params, sensor_biases, _ = apply_fault_config(
+                t, fault_config, copy.deepcopy(nominal_params),
+                fresh_sensor_biases(n_cyl), 0.0, FAULT_ALTITUDE_FT,
+            )
+
+            plant.step(DT, faulted_params, atm, FAULT_THROTTLE_PCT)
+            twin.step(DT, nominal_params, atm, FAULT_THROTTLE_PCT)
+
+            out_plant = plant.get_outputs()
+            out_twin  = twin.get_outputs()
+
+            measured  = mp.measure(out_plant, sensor_biases=sensor_biases, add_noise=True)
+            predicted = mt.measure(out_twin, add_noise=False)
+            rho = compute_residuals(measured, predicted, cfg, sigma_vec=sigma_vec)
+
+            # Damage integration
+            cht_vals = out_plant['cht_C']
+            T_cht_mean_K = sum(cht_vals) / len(cht_vals) + 273.15
+            T_fric = 6.2 * faulted_params.get('f_fric_scale', 1.0) * plant.w / 100.0
+            damage.step(
+                dt=DT,
+                fault_config=fault_config,
+                T_fric=T_fric,
+                omega=plant.w,
+                T_cht_K=T_cht_mean_K,
+                oil_temp_K=plant.T_oil,
+                t=t,
+            )
+            dmg = damage.get_state()
+
+            row: dict = {
+                "t":             t,
+                "fault_name":    name,
+                "altitude_ft":   FAULT_ALTITUDE_FT,
+                "throttle_pct":  FAULT_THROTTLE_PCT,
+            }
+            for i, r in enumerate(rho):
+                row[f"rho{i + 1}"] = float(r) if r is not None else float("nan")
+
+            row.update({
+                "rpm":            measured["rpm"],
+                "map_hPa":        measured["map_hPa"],
+                "iat_K":          measured["iat_K"],
+                "fuel_flow_kgps": measured["fuel_flow_kgps"],
+                "brake_power_kW": measured["brake_power_kW"],
+                "turbo_rpm":      measured["turbo_rpm"],
+                "cht_C_mean":     float(np.mean(measured["cht_C"])),
+                "egt_C_mean":     float(np.mean(measured["egt_C"])),
+                "lambda_val":     float(measured.get("lambda_val", float("nan"))),
+                "oil_press_bar":  measured["oil_press_bar"],
+                "oil_temp_C":     measured["oil_temp_C"],
+                "D":              dmg["damage_state"],
+                "dD_dt":          dmg["damage_rate_per_hr"] / 3600.0,
+                "RUL_h":          dmg["rul_h"] if dmg["rul_h"] is not None else float("nan"),
+            })
+            rows.append(row)
+
+        # Write output
+        try:
+            import pandas as pd  # type: ignore
+            df = pd.DataFrame(rows)
+            try:
+                out_path = out_dir / f"{name}.parquet"
+                df.to_parquet(out_path, index=False)
+                print(f"    → {out_path}  ({len(df)} rows)")
+            except Exception:
+                out_path = out_dir / f"{name}.csv"
+                df.to_csv(out_path, index=False)
+                print(f"    → CSV fallback: {out_path}  ({len(df)} rows)")
+        except ImportError:
+            import csv as _csv
+            out_path = out_dir / f"{name}.csv"
+            with open(out_path, "w", newline="", encoding="utf-8") as fh:
+                writer = _csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"    → CSV (no pandas): {out_path}  ({len(rows)} rows)")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -227,12 +392,17 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="PRAMANA sigma bootstrap (+ optional healthy dataset)"
+        description="PRAMANA sigma bootstrap (+ optional healthy/fault datasets)"
     )
     parser.add_argument(
         "--with-dataset",
         action="store_true",
         help="Also write data/healthy_flights/healthy_001.parquet for BE-2",
+    )
+    parser.add_argument(
+        "--with-faults",
+        action="store_true",
+        help="Generate labelled fault-run datasets in data/fault_runs/",
     )
     args = parser.parse_args()
 
@@ -263,12 +433,15 @@ def main() -> None:
     print(f"\nWrote {out_path}")
 
     # Optional healthy dataset
+    data_root = Path(__file__).resolve().parent.parent.parent / "data"
     if args.with_dataset:
-        data_dir = (
-            Path(__file__).resolve().parent.parent.parent
-            / "data" / "healthy_flights"
-        )
-        write_healthy_dataset(cfg, data_dir)
+        write_healthy_dataset(cfg, data_root / "healthy_flights")
+
+    # Optional fault-run datasets
+    if args.with_faults:
+        print(f"\nGenerating fault-run datasets...")
+        write_fault_dataset(cfg, data_root / "fault_runs")
+        print("Done.")
 
 
 if __name__ == "__main__":

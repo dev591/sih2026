@@ -1,8 +1,10 @@
 import numpy as np
+import random
 
 class MVEM:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, seed: int = 42):
         self.cfg = config
+        self.rng = random.Random(seed)
 
         mvem_cfg = self.cfg.get('mvem', {})
         self.R = mvem_cfg.get('R_air_J_per_kgK', 287.05)
@@ -197,6 +199,10 @@ class MVEM:
         eta_c_scale = params.get('eta_c_scale', 1.0)
         hA_scale = params.get('hA_scale', 1.0)
         f_fric_scale = params.get('f_fric_scale', 1.0)
+        oil_pump_scale = params.get('oil_pump_scale', 1.0)
+        fuel_rail_scale = params.get('fuel_rail_scale', 1.0)
+        misfire_prob = params.get('misfire_prob', [0.0] * self.N_cyl)
+        detonation_sev = params.get('detonation_sev', [0.0] * self.N_cyl)
 
         p_atm = atm['p']
         T_atm = atm['T']
@@ -237,7 +243,7 @@ class MVEM:
             target_m_f_total = self.m_a / (self.AFR_st * max(lambda_target, 0.8))
             self.fuel_cmd = target_m_f_total / self.N_cyl
 
-            self.fuel_delivered = cd_inj * self.fuel_cmd
+            self.fuel_delivered = cd_inj * self.fuel_cmd * fuel_rail_scale
             m_f_total = np.sum(self.fuel_delivered)
 
             self.lambda_val = self.m_a / (self.AFR_st * max(m_f_total, 1e-6))
@@ -251,6 +257,20 @@ class MVEM:
             # ~1.08, near the smoke limit any real diesel is bounded by).
             eta_i = 0.50
             T_ind_i = eta_i * self.fuel_delivered * self.Q_LHV / max(self.w, 1.0)
+            
+            # Apply misfire and detonation (discrete/cycle-level)
+            Q_gas_mult = np.ones(self.N_cyl)
+            for cyl in range(self.N_cyl):
+                if self.rng.random() < misfire_prob[cyl]:
+                    self.fuel_delivered[cyl] = 0.0
+                    T_ind_i[cyl] = 0.0
+                else:
+                    k_sev = detonation_sev[cyl]
+                    if k_sev > 0.0 and self.rng.random() < k_sev * 0.3:
+                        T_ind_i[cyl] *= (1.0 - k_sev * 0.4)
+                        Q_gas_mult[cyl] = (1.0 + k_sev * 0.8)
+
+            m_f_total = np.sum(self.fuel_delivered) # Recompute after misfires
             T_ind = np.sum(T_ind_i)
 
             T_fric = 6.2 * f_fric_scale * self.w / 100.0
@@ -281,7 +301,7 @@ class MVEM:
             # SAME f_fric_scale that already drives bearing friction torque,
             # so a bearing-wear fault moves rho10 and T_fric together, the
             # way one physical fault (worn bearings) should.
-            Q_pump = self._oil_eta_vol * self._oil_D_pump * (N_rpm / 60.0)
+            Q_pump = self._oil_eta_vol * self._oil_D_pump * (N_rpm / 60.0) * oil_pump_scale
             visc_factor = (self._oil_visc_ref_T / max(self.T_oil, 250.0)) ** self._oil_visc_exp
             dp_bearing_bar = self._oil_dp_gain * Q_pump * visc_factor / max(f_fric_scale, 0.3)
             self.oil_press_bar_val = min(dp_bearing_bar, self._oil_relief_bar)
@@ -291,7 +311,7 @@ class MVEM:
                 / self._oil_thermal_mass_J
 
             # 4. Cylinder Head Thermal
-            Q_gas_i = 0.15 * self.fuel_delivered * self.Q_LHV
+            Q_gas_i = 0.15 * self.fuel_delivered * self.Q_LHV * Q_gas_mult
             h_air = 50.0 * hA_scale
             dT_cht_dt = (Q_gas_i - h_air * self.A_fin * (self.T_cht - self.T_cool)) / (self.m_cht * self.cp_cht)
 

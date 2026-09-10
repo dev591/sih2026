@@ -28,6 +28,7 @@ from twin.atmosphere import isa
 from twin.faults import apply_fault_config, fresh_sensor_biases
 from twin.measurement import MeasurementModel
 from twin.mvem import MVEM
+from twin.damage import DamageIntegrator
 from twin.profiles import load_engine_profile
 
 # ---------------------------------------------------------------------------
@@ -247,9 +248,9 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
 
     # Per-connection engine instances — each tab gets its own physics
-    plantA = MVEM(cfg)
-    twinA  = MVEM(cfg)
-    plantB = MVEM(cfg)
+    plantA = MVEM(cfg, seed=42)
+    twinA  = MVEM(cfg, seed=43)
+    plantB = MVEM(cfg, seed=44)
 
     measureA    = MeasurementModel(seed=42)
     measureB    = MeasurementModel(seed=100)
@@ -257,6 +258,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
     # Per-connection, like the plants above: the pipeline carries a rolling
     # residual window and a UKF, so two judges on two tabs must not share one.
     ml = InferencePipeline() if ML_AVAILABLE else None
+    damage = DamageIntegrator()
 
     # Per-connection fault state and anomaly persistence counter
     conn: dict = {
@@ -282,6 +284,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     conn["fault_config"]  = {}
                     conn["isa_offset_K"]  = 0.0
                     conn["persist_count"] = 0
+                    damage.reset()
         except (WebSocketDisconnect, RuntimeError):
             pass
 
@@ -295,11 +298,15 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
 
                 # Build nominal params and apply fault configuration
                 nominal_params = {
-                    "cd_inj":       [1.0] * N_CYL,
-                    "eta_v_scale":  1.0,
-                    "eta_c_scale":  1.0,
-                    "hA_scale":     1.0,
-                    "f_fric_scale": 1.0,
+                    "cd_inj":         [1.0] * N_CYL,
+                    "eta_v_scale":    1.0,
+                    "eta_c_scale":    1.0,
+                    "hA_scale":       1.0,
+                    "f_fric_scale":   1.0,
+                    "oil_pump_scale": 1.0,
+                    "fuel_rail_scale": 1.0,
+                    "misfire_prob":   [0.0] * N_CYL,
+                    "detonation_sev": [0.0] * N_CYL,
                 }
                 plantA_params, sensor_biasesA, isa_k = apply_fault_config(
                     t,
@@ -307,6 +314,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     nominal_params,
                     fresh_sensor_biases(N_CYL),
                     conn["isa_offset_K"],
+                    altitude_ft,
                 )
                 conn["isa_offset_K"] = isa_k
 
@@ -326,6 +334,21 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 measuredA  = measureA.measure(out_plantA, sensor_biases=sensor_biasesA, add_noise=True)
                 predictedA = measureTwin.measure(out_twinA, add_noise=False)
                 measuredB  = measureB.measure(out_plantB, add_noise=True)
+
+                # ── Damage integration ────────────────────────────────
+                _cht_vals = out_plantA['cht_C']
+                _T_cht_mean_K = sum(_cht_vals) / len(_cht_vals) + 273.15
+                _T_fric = 6.2 * plantA_params.get('f_fric_scale', 1.0) * plantA.w / 100.0
+                damage.step(
+                    dt=1.0,
+                    fault_config=conn["fault_config"],
+                    T_fric=_T_fric,
+                    omega=plantA.w,
+                    T_cht_K=_T_cht_mean_K,
+                    oil_temp_K=plantA.T_oil,
+                    t=t,
+                )
+                dmg_state = damage.get_state()
 
                 # ── Residuals ─────────────────────────────────────────────
                 rho = compute_residuals(measuredA, predictedA, cfg, sigma_vec=sigma_vec)
@@ -433,7 +456,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "order_0p5_phase_deg": 143.7,
                     "order_1p0_mag":       0.118,
                     "order_2p0_mag":       0.077,
-                    "knock_intensity":     [0.02] * N_CYL,
+                    "knock_intensity":     [float(plantA_params['detonation_sev'][i]) if plantA_params['detonation_sev'][i] > 0.01 else 0.02 for i in range(N_CYL)],
                     "vib_band_rms": {
                         "lo_0_500":   0.31,
                         "mid_500_5k": 0.44,
@@ -515,12 +538,12 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     # Returns the RUL key the frontend uses to show the panel.
                     "rul": {
                         "component":     _rul_component(conn["fault_config"]),
-                        "physics_h":     50.0,
+                        "physics_h":     dmg_state["rul_h"],
                         "network_h":     50.0,
-                        "p10_h":         45.0,
-                        "p50_h":         50.0,
-                        "p90_h":         55.0,
-                        "reported_h":    50.0,
+                        "p10_h":         (dmg_state["rul_h"] * 0.9) if dmg_state["rul_h"] is not None else 45.0,
+                        "p50_h":         dmg_state["rul_h"] if dmg_state["rul_h"] is not None else 50.0,
+                        "p90_h":         (dmg_state["rul_h"] * 1.1) if dmg_state["rul_h"] is not None else 55.0,
+                        "reported_h":    dmg_state["rul_h"] if dmg_state["rul_h"] is not None else 50.0,
                         "heads_disagree": False,
                     },
 
@@ -571,11 +594,8 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     try:
                         inferred = ml.run(
                             rho,
-                            # dD/dt is BE-1's damage integrator (Day 3). Until it
-                            # exists the physics RUL head reports null rather than
-                            # a fabricated number — see ml/m3_rul/model.py.
-                            damage_state=0.0,
-                            damage_rate_per_hr=0.0,
+                            damage_state=dmg_state["damage_state"],
+                            damage_rate_per_hr=dmg_state["damage_rate_per_hr"],
                         )
                         health.update(inferred)
                         # diagnosis.probe is part of the schema but is the active
