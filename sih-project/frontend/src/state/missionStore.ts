@@ -133,6 +133,13 @@ export const useMission = create<MissionState>((set, get) => ({
   seekTo: (t) => set({ index: Math.max(0, Math.min(t, MISSION_DURATION_S)) }),
 
   applyConfig: (cfg, opts) => {
+    if (get().source === 'live') {
+      if (Object.keys(cfg).length === 0) {
+        feed.send({ type: 'reset' });
+      } else {
+        feed.send({ type: 'fault_config', config: cfg });
+      }
+    }
     const ticks = generateFrom(cfg, get().engine);
     set({
       ticks,

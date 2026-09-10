@@ -62,12 +62,14 @@ limits:
                                  # Twin fires ~15 min earlier on a fouling injector.
   coolant_exit_C: 120.0
   oil_temp_inlet_C: 130.0        # second-order confirmation for lubrication faults
+  oil_temp_C_nominal: 90.0       # healthy cruise value — provenance: assumed
   oil_pressure_bar:
     min_above_3500rpm: 2.0
     max_above_3500rpm: 5.0
     min_below_3500rpm: 0.8       # SPEED-DEPENDENT — a fixed threshold gets this
                                  # wrong, a twin does not. Good talking point.
     max_cold_start: 7.0          # startup transient the model should reproduce
+    nominal: 3.0                 # healthy cruise value — provenance: assumed
   airbox_temp_C: 88.0            # intercooler / charge-air health
   manifold_pressure_hPa:
     takeoff: 1350                # boost target; turbo degradation = failure to hold
@@ -111,11 +113,17 @@ mvem:
     map: compressor_map_rotax.csv
     inertia_kgm2: 1.4e-5
     mech_efficiency: 0.98
+    speed_nominal_rpm: 100000             # provenance: assumed
     provenance: assumed
+
+  turbine:
+    efficiency_nominal: 0.68              # provenance: assumed
 
   crankshaft:
     inertia_kgm2: 0.12
-    friction_coeff_nominal: 1.0
+    friction_coeff_nominal: 4.5          # provenance: assumed (smaller engine)
+
+  indicated_efficiency: 0.65            # spark ignition, slightly lower diesel — provenance: assumed
 
   thermal:
     head_mass_kg: 2.1

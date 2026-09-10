@@ -1,4 +1,26 @@
-# Add SIH project-specific ignores here
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
+*.egg-info/
+
+# Generated data — regenerate with: python -m parity.sigma_generator --with-dataset
+data/healthy_flights/
+data/fault_runs/
+data/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Frontend build artifacts
+frontend/dist/
+frontend/.next/
+frontend/node_modules/
+
+# Env files with secrets
+.env
+.env.production
