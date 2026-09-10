@@ -16,9 +16,15 @@
   --line-2:    #c6d1de;
   --void:      #e8edf3;
 
-  --text:      #16202c;
-  --text-dim:  #5a6a7d;
-  --text-dimr: #8a97a7;
+  /* Three steps, all measured against --bg and all clearing WCAG AA 4.5:1.
+     --text-dimr was #8a97a7, which measured 2.75:1 — below even the 3:1
+     large-text floor, across 49 call sites carrying units, axis labels and
+     panel subtitles. It read as mush on a projector. --text-dim moved with
+     it so the hierarchy keeps its separation instead of collapsing into
+     two near-identical greys. */
+  --text:      #16202c;   /* 15.19:1 */
+  --text-dim:  #4d5b6b;   /*  6.41:1 */
+  --text-dimr: #647284;   /*  4.53:1 */
 
   --ok:        #047857;
   --warn:      #b45309;
@@ -475,11 +481,33 @@ body {
 /* ---------------- 3D viewport ---------------- */
 .engine3d { width: 100%; height: 100%; position: relative; }
 .engine3d canvas { display: block; }
+
+/* The single persistent engine, positioned over whichever slot is active.
+   z-index sits above panel bodies but below the edge tabs (12), drawers (20,
+   40) and the report (400), so every overlay still covers it. */
+.engine3d-layer { position: fixed; z-index: 2; }
+.engine-slot { width: 100%; height: 100%; }
+/* Expert view reserves the panel's height; the slot is what holds it open now
+   that the canvas is not in the flow. */
+.panel-body-3d .engine-slot { min-height: 432px; }
 .engine3d-hint {
   position: absolute; bottom: 9px; left: 13px;
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
   color: var(--text-dimr); pointer-events: none;
 }
+
+/* Recovery from a judge's orbit. Same corner idiom as the hint rather than a
+   new visual language — it should read as part of the viewport furniture, not
+   as a control competing with the panels. */
+.engine3d-reset {
+  position: absolute; bottom: 7px; right: 13px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  color: var(--text-dimr); background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 2px;
+  padding: 3px 8px; cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.engine3d-reset:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---------------- data source badge ---------------- */
 .brand-right { display: flex; align-items: center; gap: 10px; }
@@ -720,12 +748,27 @@ body {
   background: var(--bg-2);
   border-top: 1px solid var(--line);
 }
-.stage .engine3d { position: absolute; inset: 0; }
+/* The engine no longer lives in the stage — a slot marks where it goes and the
+   single fixed layer draws over it. See state/engineSlot.ts.
+
+   The bottom inset is the verdict card's lane. FitCamera solves against the
+   canvas it is given, so reserving the space here is what stops the engine
+   being drawn behind the card and cropped by the viewport edge — the framing
+   composes above the card instead of colliding with it. */
+.stage .engine-slot {
+  position: absolute; inset: 0 0 124px 0;
+  /* Beat the generic .engine-slot 100% sizing — with an explicit height the
+     bottom inset is ignored and the reserved lane does nothing. */
+  width: auto; height: auto;
+}
 
 /* ---- the verdict card: the whole pitch in one glance ---- */
 .verdict {
   position: absolute;
   left: 50%; bottom: 52px;
+  /* Above the engine layer (z-index 2), which is fixed and would otherwise
+     paint straight over this card. */
+  z-index: 10;
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: auto 1px auto;
@@ -878,3 +921,258 @@ body {
 .note-fold[open] > .note-sum::before { transform: rotate(90deg); }
 .note-sum:hover { color: var(--text-dim); }
 .note-fold[open] > .note-sum { margin-bottom: 4px; }
+
+/* ===========================================================================
+   POST-FLIGHT REPORT — demo-script.md's 3:30 beat.
+
+   Deliberately NOT in the dashboard's visual language. The GCS is an
+   instrument: mono, tinted, dense. This is a document that leaves the building
+   and is read by someone who was not in the room. It borrows the project's
+   existing print vocabulary from docs/team/print.css — serif body, sans
+   headings, navy rule — so the two artifacts read as coming from the same
+   organisation without looking like the same thing.
+
+   On screen it is an overlay sheet; on paper the print block below strips the
+   application away and this becomes the page. What the presenter sees is what
+   the PDF contains.
+   =========================================================================== */
+
+.report-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  background: #e9edf2;
+  overflow-y: auto;
+  /* Without this a scroll that reaches the end of the sheet keeps going into
+     the canvas behind and orbits the camera mid-demo. */
+  overscroll-behavior: contain;
+  padding: 20px 16px 56px;
+  display: flex; flex-direction: column; align-items: center;
+
+  --doc-ink:   #14171a;
+  --doc-muted: #5b6470;
+  --doc-rule:  #d9dee4;
+  --doc-navy:  #1e3a8a;
+  --doc-soft:  #eef2fb;
+  --doc-alert: #9f1239;
+  --doc-ok:    #046b4e;
+  --doc-serif: "Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --doc-sans:  "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.report-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  width: 100%; max-width: 210mm; margin-bottom: 12px;
+}
+
+/* A4 width so the on-screen sheet is the printed page, not an approximation. */
+.report-sheet {
+  width: 100%; max-width: 210mm;
+  background: #fff;
+  border: 1px solid #cfd6de;
+  padding: 17mm 16mm 13mm;
+  color: var(--doc-ink);
+  font-family: var(--doc-serif);
+  font-size: 10.4pt; line-height: 1.5;
+  box-shadow: 0 2px 18px rgb(20 34 51 / 0.10);
+}
+
+/* ---------------- document control block ---------------- */
+.doc-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px;
+}
+.doc-brand {
+  font-family: var(--doc-sans);
+  font-size: 19pt; font-weight: 700; letter-spacing: -0.015em;
+  color: var(--doc-navy); line-height: 1.1;
+}
+.doc-mark { font-weight: 400; margin-right: 7px; }
+.doc-org {
+  font-family: var(--doc-sans); font-size: 9.6pt;
+  color: var(--doc-ink); margin-top: 3px;
+}
+.doc-ps {
+  font-family: var(--doc-sans); font-size: 8.2pt;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--doc-muted); margin-top: 2px;
+}
+
+.doc-control {
+  border-collapse: collapse; font-family: var(--doc-sans); font-size: 8.2pt;
+  border: 1px solid var(--doc-rule); min-width: 62mm;
+}
+.doc-control th, .doc-control td {
+  padding: 2.5px 7px; border: 1px solid var(--doc-rule); text-align: left;
+}
+.doc-control th {
+  background: #f4f6fa; color: var(--doc-muted);
+  text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+  white-space: nowrap;
+}
+.doc-control td { font-variant-numeric: tabular-nums; }
+
+/* ---------------- marking strip ----------------
+   Reads as a classification band, carries the honesty disclosure. */
+.doc-marking {
+  margin-top: 11px;
+  border-top: 2.5px solid var(--doc-navy);
+  border-bottom: 1px solid var(--doc-navy);
+  padding: 4px 0;
+  font-family: var(--doc-sans); font-size: 8.2pt; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--doc-navy); text-align: center;
+}
+
+.doc-title {
+  font-family: var(--doc-sans);
+  font-size: 15.5pt; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--doc-ink);
+  margin: 15px 0 0; text-align: center;
+}
+
+/* ---------------- sections ---------------- */
+.doc-sec { margin-top: 15px; break-inside: avoid; }
+.doc-sec h2 {
+  font-family: var(--doc-sans);
+  font-size: 9.4pt; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--doc-navy);
+  margin: 0 0 6px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--doc-rule);
+  display: flex; align-items: baseline; gap: 9px;
+}
+.sec-no {
+  display: inline-block; min-width: 14px;
+  color: var(--doc-muted); font-variant-numeric: tabular-nums;
+}
+.doc-note { color: #3d4650; font-size: 9.5pt; margin: 6px 0 0; }
+.doc-note strong { color: #000; }
+
+/* ---------------- tables ---------------- */
+.doc-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-top: 6px; }
+.doc-table th {
+  font-family: var(--doc-sans); font-size: 8pt; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  text-align: left; color: var(--doc-muted);
+  border-bottom: 1.4px solid var(--doc-ink);
+  padding: 3.5px 7px 3.5px 0;
+}
+.doc-table td {
+  padding: 3.5px 7px 3.5px 0; border-bottom: 1px solid var(--doc-rule);
+}
+.doc-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.doc-table tbody tr:nth-child(even) { background: #fafbfc; }
+.doc-table .row-excited td { color: var(--doc-alert); font-weight: 600; }
+.doc-table .row-strong td { font-weight: 700; }
+
+/* identity grid: label/value pairs, two per row */
+.doc-table-ident th {
+  border-bottom: 1px solid var(--doc-rule);
+  font-size: 7.8pt; width: 1%; white-space: nowrap; padding-right: 10px;
+}
+.doc-table-ident td { padding-right: 22px; }
+
+/* ---------------- finding ---------------- */
+.doc-finding { display: flex; gap: 22px; align-items: flex-start; }
+.doc-finding-main { flex: 1; min-width: 0; }
+.doc-fault {
+  font-family: var(--doc-sans); font-size: 15pt; font-weight: 700;
+  line-height: 1.2; letter-spacing: -0.01em;
+}
+.doc-fault.is-ok { color: var(--doc-ok); }
+.doc-fault.is-alert { color: var(--doc-alert); }
+.doc-cyl { font-weight: 500; color: var(--doc-ink); }
+.doc-finding-note { margin: 7px 0 0; font-size: 9.8pt; }
+
+.doc-kv {
+  border-collapse: collapse; font-size: 8.8pt; min-width: 62mm;
+  border: 1px solid var(--doc-rule);
+}
+.doc-kv th, .doc-kv td { padding: 3px 8px; border: 1px solid var(--doc-rule); text-align: left; }
+.doc-kv th {
+  font-family: var(--doc-sans); font-size: 7.8pt; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--doc-muted); background: #f4f6fa; white-space: nowrap;
+}
+.doc-kv td { font-family: var(--doc-sans); font-variant-numeric: tabular-nums; }
+.doc-kv td.is-alert { color: var(--doc-alert); font-weight: 700; }
+
+/* ---------------- callout ---------------- */
+.doc-callout {
+  background: var(--doc-soft); border-left: 3.5px solid var(--doc-navy);
+  padding: 8px 12px; font-size: 9.6pt;
+}
+.doc-limits { font-family: var(--doc-sans); font-weight: 700; letter-spacing: 0.04em; }
+.limits-green { color: var(--doc-ok); }
+.limits-caution { color: #92620b; }
+.limits-exceeded { color: var(--doc-alert); }
+
+.doc-two-up { display: flex; gap: 26px; }
+.doc-two-up > .doc-sec { flex: 1; min-width: 0; }
+
+.doc-refs {
+  margin: 6px 0 0; padding-left: 20px;
+  font-size: 9.3pt; color: #3d4650;
+}
+.doc-refs li { margin-bottom: 2px; }
+
+/* ---------------- authority block ----------------
+   The single element that does most of the work of reading as a real
+   engineering document rather than a printed web page. */
+.doc-authority {
+  display: flex; gap: 26px; margin-top: 22px;
+  break-inside: avoid;
+}
+.doc-sign { flex: 1; }
+.doc-sign-line {
+  border-bottom: 1px solid var(--doc-ink);
+  height: 26px;
+  font-family: var(--doc-sans); font-size: 8.6pt; color: var(--doc-ink);
+  display: flex; align-items: flex-end; padding-bottom: 3px;
+}
+.doc-sign-filled { color: var(--doc-navy); font-weight: 600; }
+.doc-sign-role {
+  font-family: var(--doc-sans); font-size: 7.6pt;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--doc-muted); margin-top: 4px;
+}
+
+.doc-foot-meta {
+  margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--doc-rule);
+  font-family: var(--doc-sans); font-size: 7.4pt;
+  letter-spacing: 0.045em; color: var(--doc-muted); text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   PRINT — the report becomes the page and nothing else exists. Backgrounds are
+   forced on so the marking strip, the navy rules and the excited-residual rows
+   survive into the PDF, which is the point of printing it at all.
+   --------------------------------------------------------------------------- */
+@media print {
+  @page { size: A4 portrait; margin: 14mm 13mm; }
+
+  html, body { background: #fff !important; }
+
+  /* Hide the application; the report is the document. */
+  body > #root > .app,
+  body > #root > .engine3d-layer { display: none !important; }
+  .no-print { display: none !important; }
+
+  .report-overlay {
+    position: static; padding: 0; display: block;
+    background: #fff !important; overflow: visible;
+  }
+  .report-sheet {
+    max-width: none; width: auto;
+    border: none; box-shadow: none; padding: 0;
+  }
+
+  .doc-sec, .doc-two-up, .doc-authority, .doc-head { break-inside: avoid; }
+  .doc-table thead { display: table-header-group; }
+  .doc-table tr { break-inside: avoid; }
+
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+
+/* Section and column headings are uppercased for the document look, which
+   turns a lowercase sigma into a capital one. Opt individual symbols out. */
+.doc-table th .lit, .doc-kv th .lit, .doc-sec h2 .lit { text-transform: none; }

@@ -305,9 +305,16 @@ incidence matrix. It is derivable from physics, needs no fault examples to
 build, and generalizes to any fault whose mechanism is understood even if it
 was never in the training set.
 
-The network and the matrix are **independent mechanisms** — one is learned
-from labelled examples, the other is derived from first principles — so their
-agreement is not redundant, it is *evidence*. `SOLUTION-ANALYSIS.md` §2.9: "the
+The network and the matrix are **two mechanisms of different kinds** — one
+learned from labelled examples, the other derived from first principles — but
+they are **not statistically independent**, and the distinction matters when a
+panel probes it. Our training residuals are generated *around* the incidence
+signatures (`ml/data/synthetic.py`), so a classifier that reproduced the matrix
+exactly would prove nothing. Training samples are therefore jittered off the
+nominal columns, which makes the classifier learn a region rather than the
+matrix itself, and makes the agreement rate a measured quantity — reported in
+`ml/weights/m3_classifier_report.json` — instead of an identity. Quote the
+measured rate; do not claim independence. `SOLUTION-ANALYSIS.md` §2.9: "the
 network gives accuracy, the matrix gives the why." A judge who asks "how do
 you know the network isn't just pattern-matching something spurious" gets
 answered by "because an independently-derived physical mechanism agrees with

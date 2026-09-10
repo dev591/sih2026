@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { EffectComposer, Bloom, SMAA } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { useMission, useCurrentTick } from '../state/missionStore';
@@ -28,10 +29,18 @@ import { SCENE } from '../theme';
  *  cannot disagree about what "centred" means. */
 const TARGET: [number, number, number] = [0.16, 0.28, 0];
 
+/** The composed viewing angle. Used both as the Canvas's initial camera and as
+ *  what "Reset view" restores, so the two cannot drift apart. Only the
+ *  DIRECTION from TARGET matters — FitCamera solves the distance. */
+const CAMERA_HOME: [number, number, number] = [1.7, 2.15, 6.5];
+
 /** Half-extents of the engine in scene units: four cylinders on 1.42 spacing
  *  plus the turbo and the prop flange make it a long, fairly flat object. */
 const HALF_W = 3.7;
-const HALF_H = 1.9;
+/* Measured from the frame, not from the model: at 1.9 the sump ran off the
+   bottom of the stage viewport. The camera looks down from +y, so perspective
+   pushes the near underside lower than the model's own half-height suggests. */
+const HALF_H = 2.35;
 
 /**
  * Frame the engine to the viewport it actually has.
@@ -48,10 +57,14 @@ const HALF_H = 1.9;
  * vertical one, and use whichever is larger. This also handles window resizes
  * and a projector's aspect ratio for free, which the hardcoded value never did.
  */
-function FitCamera() {
+function FitCamera(
+  { resetNonce, controls }:
+  { resetNonce: number; controls: React.RefObject<OrbitControlsImpl | null> }
+) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const width = useThree((s) => s.size.width);
   const height = useThree((s) => s.size.height);
+  const lastReset = useRef(resetNonce);
 
   useEffect(() => {
     // A canvas can report a degenerate size on its first layout pass, and an
@@ -68,13 +81,27 @@ function FitCamera() {
       20
     );
 
-    // Move along the CURRENT view direction, so this reframes without throwing
-    // away an orbit the operator has already set up.
     const target = new THREE.Vector3(...TARGET);
-    const dir = camera.position.clone().sub(target).normalize();
+
+    // On a RESIZE, move along the CURRENT view direction so the reframe does
+    // not throw away an orbit the operator has already set up. On an explicit
+    // RESET, restore the composed viewing angle as well — that is the whole
+    // point of the control.
+    const isReset = resetNonce !== lastReset.current;
+    lastReset.current = resetNonce;
+
+    const dir = isReset
+      ? new THREE.Vector3(...CAMERA_HOME).sub(target).normalize()
+      : camera.position.clone().sub(target).normalize();
+
     camera.position.copy(target).addScaledVector(dir, dist);
     camera.updateProjectionMatrix();
-  }, [camera, width, height]);
+
+    // OrbitControls keeps its own spherical state and rewrites the camera every
+    // frame, so moving the camera behind its back is silently undone. Pushing
+    // update() makes it re-derive from the position we just set.
+    controls.current?.update();
+  }, [camera, width, height, resetNonce, controls]);
 
   return null;
 }
@@ -264,37 +291,47 @@ function Scene() {
           on black the object read as grounded simply by being lighter than its
           surroundings. No gridHelper: on a white studio floor a grid reads as
           drawing-paper texture and fights the object for attention. */}
-      <FitCamera />
       <GroundShadow />
 
-      <OrbitControls
-        enablePan={false}
-        enableDamping
-        dampingFactor={0.06}
-        minDistance={3.6}
-        maxDistance={22}
-        minPolarAngle={0.15}
-        maxPolarAngle={Math.PI / 2.08}
-        target={TARGET}
-      />
     </>
   );
 }
 
 export function Engine3D() {
+  // Bumping this re-runs FitCamera and restores CAMERA_HOME. The demo script
+  // hands the mouse to a judge to orbit the engine; without a way back, one
+  // stray scroll leaves it cropped for the rest of the presentation.
+  const [resetNonce, setResetNonce] = useState(0);
+  const controls = useRef<OrbitControlsImpl>(null);
+
   return (
     <div className="engine3d">
       {/* Position here only sets the viewing ANGLE — FitCamera overrides the
           distance from the actual viewport. */}
       <Canvas
         shadows
-        camera={{ position: [1.7, 2.15, 6.5], fov: 37 }}
+        camera={{ position: CAMERA_HOME, fov: 37 }}
         dpr={[1, 2]}
         gl={{ antialias: false, toneMapping: THREE.NeutralToneMapping, toneMappingExposure: 1.0 }}
       >
         <color attach="background" args={[SCENE.bg]} />
         <fog attach="fog" args={[SCENE.bg, SCENE.fogNear, SCENE.fogFar]} />
         <Scene />
+        {/* Both live here rather than in Scene so they can share the controls
+            ref and read the reset counter, which belongs to the component that
+            owns the button. */}
+        <FitCamera resetNonce={resetNonce} controls={controls} />
+        <OrbitControls
+          ref={controls}
+          enablePan={false}
+          enableDamping
+          dampingFactor={0.06}
+          minDistance={3.6}
+          maxDistance={22}
+          minPolarAngle={0.15}
+          maxPolarAngle={Math.PI / 2.08}
+          target={TARGET}
+        />
         {/* Bloom is what makes a faulted cylinder read as GLOWING rather than
             merely tinted — the difference between "that one is orange" and
             "that one is wrong" at a glance from across a room.
@@ -319,6 +356,13 @@ export function Engine3D() {
         </EffectComposer>
       </Canvas>
       <div className="engine3d-hint">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK A CYLINDER</div>
+      <button
+        className="engine3d-reset"
+        onClick={() => setResetNonce((n) => n + 1)}
+        title="Restore the framed view"
+      >
+        RESET VIEW
+      </button>
     </div>
   );
 }

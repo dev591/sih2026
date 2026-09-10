@@ -9,8 +9,11 @@ import { FaultConsole, InjectedTruth } from './components/FaultConsole';
 import { MissionMap } from './components/MissionMap';
 import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
+import { FlightReport } from './components/FlightReport';
+import { EngineSlot } from './components/EngineSlot';
 import { SimpleView } from './components/SimpleView';
 import { useCurrentTick, useMission } from './state/missionStore';
+import { useEngineSlot } from './state/engineSlot';
 import { ENGINES } from './config/engines';
 import './App.css';
 
@@ -106,6 +109,50 @@ function EngineSubtitle() {
 }
 
 /**
+ * The one and only 3D engine, positioned over whichever view is asking for it.
+ *
+ * Mounted here for the life of the app rather than inside each view: the mode
+ * toggle is a ternary, so a per-view Canvas was destroyed and rebuilt on every
+ * switch, taking its EffectComposer with it and leaving the default demo view
+ * blank for about eight seconds. See state/engineSlot.ts.
+ */
+function Engine3DLayer() {
+  const rect = useEngineSlot((s) => s.rect);
+  const reportOpen = useMission((s) => s.reportOpen);
+  if (!rect) return null;
+  return (
+    <div
+      className="engine3d-layer"
+      style={{
+        top: rect.top, left: rect.left, width: rect.width, height: rect.height,
+        // Hidden rather than unmounted while the report is up — unmounting
+        // would cost the context we just went to this trouble to keep.
+        visibility: reportOpen ? 'hidden' : 'visible',
+      }}
+    >
+      <Engine3D />
+    </div>
+  );
+}
+
+/**
+ * Opens the post-flight report for the frame currently under the scrubber —
+ * demo-script.md's 3:30 beat. Scrub back to detection, then print.
+ */
+function ReportButton() {
+  const setReportOpen = useMission((s) => s.setReportOpen);
+  return (
+    <button
+      className="mode-btn"
+      onClick={() => setReportOpen(true)}
+      title="Post-flight report for the frame under the scrubber"
+    >
+      REPORT
+    </button>
+  );
+}
+
+/**
  * Simple ⇄ expert. The label names the destination, not the current state.
  */
 function ModeToggle() {
@@ -153,7 +200,7 @@ function ExpertGrid() {
             <span className="panel-sub">live state · per-cylinder</span>
           </header>
           <div className="panel-body panel-body-3d">
-            <Engine3D />
+            <EngineSlot className="engine-slot" />
           </div>
         </section>
         <EgtChart />
@@ -176,6 +223,9 @@ export default function App() {
   const simple = mode === 'simple';
 
   return (
+    // The report is a SIBLING of .app, not a child: printing hides .app
+    // entirely and lets the report stand alone as the page.
+    <>
     <div className={`app app-${mode}`}>
       <header className="topbar">
         <div className="brand">
@@ -186,6 +236,7 @@ export default function App() {
         <div className="brand-right">
           <EngineSelector />
           <SourceBadge />
+          <ReportButton />
           <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>
@@ -203,5 +254,8 @@ export default function App() {
       <Scrubber />
       <ExplainDrawer />
     </div>
+    <Engine3DLayer />
+    <FlightReport />
+    </>
   );
 }

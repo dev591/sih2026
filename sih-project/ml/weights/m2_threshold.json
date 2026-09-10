@@ -1,0 +1,9 @@
+{
+  "threshold": 1.203116,
+  "percentile": 99.5,
+  "persistence": {
+    "n": 4,
+    "of": 5
+  },
+  "note": "99.5th pct of reconstruction error on held-out healthy data \u2014 never hand-picked"
+}

@@ -1,0 +1,21 @@
+{
+  "effective_rank": 10,
+  "null_space_dim": 1,
+  "singular_values": [
+    2.7605,
+    2.0889,
+    2.0889,
+    2.0889,
+    1.9203,
+    1.7002,
+    1.2794,
+    1.1555,
+    0.7858,
+    0.3479,
+    0.0
+  ],
+  "rank_tol": 0.05,
+  "n_expanded_columns": 31,
+  "threshold_99p5": 0.7341,
+  "data_note": "Rank computed on COARSE incidence matrix (entries 0,\u00b11,\u00b12). Must be recomputed on sensitivity matrix (Jacobian) before claiming this number on a slide. See novelty-detection.md."
+}

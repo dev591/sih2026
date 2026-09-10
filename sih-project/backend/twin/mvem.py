@@ -4,9 +4,9 @@ Mean-Value Engine Model (MVEM)
 Five state groups:
   1. Intake manifold pressure  — dp_im/dt = (R·T_im / V_im) · (ṁ_c − ṁ_a)
   2. Cylinder induction        — speed-density relation
-  3. Crankshaft                — dω/dt = (T_ind − T_fric − T_load) / J
+  3. Crankshaft                — dω/dt = (T_ind − T_fric − T_pump − T_load) / J
   4. Cylinder head thermal     — dT_cht/dt = (Q_gas − Q_cool) / (m·cp)
-  5. Turbocharger              — quasi-steady algebraic solve (see §5 below)
+  5. Turbocharger              — J_tc·ω_tc·dω_tc/dt = η_m·P_turb − P_comp
 
 All engine-specific constants are read from the YAML config. Nothing is
 hardcoded here — "a new engine is a config change" must be true in the code.
@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from scipy.integrate import solve_ivp
 
 
 class MVEM:
@@ -88,10 +89,6 @@ class MVEM:
         self._load_maps(config)
 
         # ── State initialisation ──────────────────────────────────────────
-        # p_im is set to None; on the first call to step() it is initialised
-        # to the compressor map's output at nominal turbo speed, so the engine
-        # starts near its operating point rather than having to bootstrap from
-        # ambient pressure.
         self.p_im: float | None = None
         self.w    = config.get('ratings', {}).get('rated_speed_rpm', 3800) * 2.0 * np.pi / 60.0
         self.T_cht = np.full(self.N_cyl, self.T_cool + 50.0)
@@ -114,19 +111,14 @@ class MVEM:
         """Load the three CSV lookup tables from the config directory."""
         cfg_dir = Path(__file__).resolve().parent.parent.parent / "config"
 
-        # Compressor map — columns: N_corr_rpm, mdot_corr_kgps, pi_c, eta_c
-        # Grouped: 8 consecutive rows per speed line, sorted by N ascending.
         comp = np.loadtxt(cfg_dir / "compressor_map.csv",
                           delimiter=',', skiprows=6)
-        # Build operating-line table: one row per speed line at peak efficiency.
-        # This gives a monotone (N_corr → mdot_corr, pi_c, eta_c) relationship
-        # that can be interpolated directly given corrected turbo speed.
         N_unique = np.unique(comp[:, 0])
         pts_per  = comp.shape[0] // len(N_unique)
         ol_N, ol_mdot, ol_pi, ol_eta = [], [], [], []
         for i, N in enumerate(N_unique):
             rows = comp[i * pts_per : (i + 1) * pts_per]
-            best = rows[np.argmax(rows[:, 3])]   # row with highest eta_c
+            best = rows[np.argmax(rows[:, 3])]
             ol_N.append(N)
             ol_mdot.append(best[1])
             ol_pi.append(best[2])
@@ -136,17 +128,14 @@ class MVEM:
         self._ol_pi   = np.array(ol_pi)
         self._ol_eta  = np.array(ol_eta)
 
-        # Volumetric efficiency — columns: p_im_Pa, N_rpm, eta_v
         etav = np.loadtxt(cfg_dir / "lookup_eta_v.csv",
                           delimiter=',', skiprows=5)
         self._etav_p   = etav[:, 0]
         self._etav_N   = etav[:, 1]
         self._etav_val = etav[:, 2]
-        # Unique grid axes for bilinear interpolation
         self._etav_p_ax = np.unique(self._etav_p)
         self._etav_N_ax = np.unique(self._etav_N)
 
-        # Propeller map — columns: J, C_P
         prop = np.loadtxt(cfg_dir / "prop_cp_map.csv",
                           delimiter=',', skiprows=5)
         self._prop_J  = prop[:, 0]
@@ -159,7 +148,6 @@ class MVEM:
         p_cl = float(np.clip(p_im,  self._etav_p_ax[0],  self._etav_p_ax[-1]))
         N_cl = float(np.clip(N_rpm, self._etav_N_ax[0], self._etav_N_ax[-1]))
 
-        # Find bounding indices on p axis
         ip = int(np.searchsorted(self._etav_p_ax, p_cl, side='right')) - 1
         ip = int(np.clip(ip, 0, len(self._etav_p_ax) - 2))
         iN = int(np.searchsorted(self._etav_N_ax, N_cl, side='right')) - 1
@@ -168,7 +156,6 @@ class MVEM:
         p0, p1 = self._etav_p_ax[ip], self._etav_p_ax[ip + 1]
         N0, N1 = self._etav_N_ax[iN], self._etav_N_ax[iN + 1]
 
-        # Row-major index: each (p, N) pair is one row
         n_N = len(self._etav_N_ax)
         v00 = self._etav_val[ip     * n_N + iN    ]
         v10 = self._etav_val[(ip+1) * n_N + iN    ]
@@ -192,14 +179,6 @@ class MVEM:
         T_atm: float,
         eta_c_scale: float,
     ) -> tuple[float, float, float]:
-        """
-        Given turbo speed and inlet conditions, return (m_c_actual, pi_c, eta_c).
-
-        Interpolates on the operating-line locus (peak-efficiency at each speed).
-        Extrapolates linearly to (0, 0) below the lowest speed line, so mass
-        flow and pressure ratio taper to zero as the turbo spins down rather
-        than clamping at the lowest map point.
-        """
         N_rpm   = w_tc * 60.0 / (2.0 * np.pi)
         theta   = T_atm / 288.15
         delta   = p_atm / 101325.0
@@ -210,10 +189,8 @@ class MVEM:
         if N_corr <= 0.0:
             mdot_corr, pi_c, eta_c = 0.0, 1.001, self.eta_c_nom * eta_c_scale
         elif N_corr < N_min:
-            # Linear extrapolation to origin below the lowest map speed
             frac      = N_corr / N_min
             mdot_corr = self._ol_mdot[0] * frac
-            # Pressure ratio also extrapolates; clamp to ≥ 1.001
             pi_c      = max(1.0 + (self._ol_pi[0] - 1.0) * frac, 1.001)
             eta_c     = self._ol_eta[0] * eta_c_scale
             eta_c     = float(np.clip(eta_c, 0.40, 0.80))
@@ -224,65 +201,131 @@ class MVEM:
             eta_c     = float(np.interp(N_cl, self._ol_N, self._ol_eta)) * eta_c_scale
             eta_c     = float(np.clip(eta_c, 0.40, 0.80))
 
-        # Un-correct mass flow to actual conditions
         m_c_actual = mdot_corr * delta / max(float(np.sqrt(theta)), 0.01)
         return max(m_c_actual, 0.0), max(pi_c, 1.001), eta_c
 
-    def _solve_turbo_quasisteady(
-        self,
-        m_ex_total: float,
-        T_egt_mean: float,
-        p_atm: float,
-        T_atm: float,
-        eta_c_scale: float,
-    ) -> tuple[float, float, float, float]:
-        """
-        Quasi-steady turbocharger solve.
+    # ── Main integration step ──────────────────────────────────────────────
 
-        At steady state: η_m · P_turb = P_comp
-        Rather than integrating a stiff ODE, we iterate w_tc until power
-        balance is achieved. Five Newton-style iterations converge in all
-        tested conditions.
-
-        Returns (w_tc_new, m_c, pi_c, eta_c).
+    def _ode_system(self, t, y, cd_inj, eta_v_scale, eta_c_scale, hA_scale, f_fric_scale, p_atm, T_atm, throttle_pct, v_tas, update_derived=False):
         """
-        # Turbine: exhaust manifold pressure approximated as
-        #   p_exh = p_atm * (1 + 0.3 * min(ω/ω_rated, 1))
-        # This is physically motivated: the exhaust backpressure rises with
-        # engine load. It is NOT using p_im for the turbine (the original bug).
-        p_exh     = p_atm * (1.0 + 0.3 * min(self.w / max(self.w_rated, 1.0), 1.0))
-        pi_t      = max(p_exh / p_atm, 1.001)
-        # Turbine available power per unit exhaust mass flow
+        Evaluate the derivatives of the state vector.
+        If update_derived is True, it will update the class attributes with the computed
+        derived parameters for this step.
+        """
+        p_im, w, w_tc = y[0], y[1], y[2]
+        T_cht = y[3:]
+
+        # Provide a floor for states to prevent non-physical behavior in ODE solver evaluations
+        p_im = max(p_im, p_atm * 0.1)
+        w = max(w, 10.0)
+        w_tc = max(w_tc, 10.0)
+
+        N_rpm = w * 60.0 / (2.0 * np.pi)
+
+        # ── §2 Cylinder induction — speed-density ─────────────────────
+        eta_v = self._lookup_eta_v(p_im, N_rpm) * eta_v_scale
+        
+        # T_im is needed for m_a. For a robust ODE, T_im comes from the compressor outlet
+        m_c, pi_c, eta_c = self._compressor_operating_point(
+            w_tc, p_atm, T_atm, eta_c_scale
+        )
+        
+        T_im = T_atm + (T_atm / max(eta_c, 0.01)) * (
+            pi_c ** ((self.gamma - 1.0) / self.gamma) - 1.0
+        )
+        
+        m_a = (
+            eta_v * p_im * self.V_d * N_rpm
+            / (self.R * T_im * 120.0)
+        )
+
+        target_m_f_total = (throttle_pct / 100.0) * m_a / self.AFR_st
+        fuel_cmd = target_m_f_total / self.N_cyl
+        fuel_delivered = cd_inj * fuel_cmd
+        m_f_total = float(np.sum(fuel_delivered))
+
+        lambda_val = m_a / (self.AFR_st * max(m_f_total, 1e-9))
+
+        T_ind_i = (
+            self.eta_i * fuel_delivered * self.Q_LHV
+            / max(w, 1.0)
+        )
+        T_ind = float(np.sum(T_ind_i))
+
+        # Friction
+        T_fric = self.f_fric_nom * f_fric_scale * w / 100.0
+
+        # Propeller load
+        n_prop  = w / (2.0 * np.pi) * self.gear_ratio
+        J_adv   = v_tas / max(n_prop * self.D_prop, 0.01)
+        C_P     = self._lookup_cp(J_adv)
+        rho_air = p_atm / (self.R * T_atm)
+        P_prop  = C_P * rho_air * (n_prop ** 3) * (self.D_prop ** 5)
+        T_load  = P_prop / max(w, 1.0)
+
+        brake_power_kW = (T_ind - T_fric) * w / 1000.0
+
+        mean_T_ind = float(np.mean(T_ind_i))
+        imbalance  = (
+            float(np.max(np.abs(T_ind_i - mean_T_ind)))
+            / max(mean_T_ind, 1e-9)
+        )
+        ripple = 0.004 + imbalance * 0.62
+
+        # ── §4 Cylinder head thermal ───────────────────────────────────
+        Q_ht_frac = 0.15
+        Q_gas_i   = Q_ht_frac * fuel_delivered * self.Q_LHV
+        h_air     = 50.0 * hA_scale
+        dT_cht_dt = (
+            Q_gas_i - h_air * self.A_fin * (T_cht - self.T_cool)
+        ) / (self.m_cht * self.cp_cht)
+
+        Q_ex_i  = fuel_delivered * self.Q_LHV * (1.0 - self.eta_i - Q_ht_frac)
+        Q_ex_i  = np.maximum(Q_ex_i, 0.0)
+        m_ex_i  = (m_a / self.N_cyl) + fuel_delivered
+        T_egt_arr = T_atm + Q_ex_i / (m_ex_i * self.cp_ex)
+
+        m_ex_total = float(np.sum(m_ex_i))
+        T_egt_mean = float(np.mean(T_egt_arr))
+
+        # ── §5 Turbocharger ODE ────────────────────────────────────────
+        p_exh = p_atm * (1.0 + 0.3 * min(w / max(self.w_rated, 1.0), 1.0))
+        pi_t  = max(p_exh / p_atm, 1.001)
+
         P_turb_specific = (
             self.eta_t * self.cp_ex * T_egt_mean
             * (1.0 - (1.0 / pi_t) ** ((self.gamma - 1.0) / self.gamma))
         )
-        P_turb_avail = self.eta_m_tc * m_ex_total * P_turb_specific
+        P_turb = m_ex_total * P_turb_specific
 
-        w_tc = self.w_tc
-        m_c, pi_c, eta_c = 0.0, 1.0, self.eta_c_nom
+        # P_comp is calculated using m_c as per the thermodynamic correction
+        P_comp = (
+            m_c * self.cp_air * T_atm / max(eta_c, 0.01)
+        ) * (pi_c ** ((self.gamma - 1.0) / self.gamma) - 1.0)
 
-        for _ in range(6):
-            m_c, pi_c, eta_c = self._compressor_operating_point(
-                w_tc, p_atm, T_atm, eta_c_scale
-            )
-            # Compressor power demand
-            P_comp = (
-                m_c * self.cp_air * T_atm / max(eta_c, 0.01)
-            ) * (pi_c ** ((self.gamma - 1.0) / self.gamma) - 1.0)
+        dw_tc_dt = (self.eta_m_tc * P_turb - P_comp) / max(self.J_tc * w_tc, 1e-6)
 
-            # Power error — positive means turbo can spin faster
-            dP = P_turb_avail - P_comp
-            if abs(dP) < 1.0:           # converged (1 W tolerance)
-                break
+        # ── §3 Crankshaft ──────────────────────────────────────────────
+        T_pump = (p_exh - p_im) * self.V_d / (4.0 * np.pi)
+        dw_dt = (T_ind - T_fric - T_pump - T_load) / self.J
 
-            # Adjust w_tc proportionally; clamp step to 20 % per iteration
-            rel_step = float(np.clip(0.15 * dP / max(P_comp, 10.0), -0.20, 0.20))
-            w_tc = max(w_tc * (1.0 + rel_step), 10.0)
+        # ── §1 Intake manifold ─────────────────────────────────────────
+        dp_im_dt = (self.R * T_im / self.V_im) * (m_c - m_a)
 
-        return w_tc, m_c, pi_c, eta_c
+        # Update derived outputs if requested
+        if update_derived:
+            self.T_im = T_im
+            self.m_a = m_a
+            self.m_c = m_c
+            self.fuel_cmd = fuel_cmd
+            self.fuel_delivered = fuel_delivered
+            self.T_egt = T_egt_arr
+            self.lambda_val = lambda_val
+            self.ripple = ripple
+            self.brake_power_kW = brake_power_kW
 
-    # ── Main integration step ──────────────────────────────────────────────
+        dy_dt = [dp_im_dt, dw_dt, dw_tc_dt] + dT_cht_dt.tolist()
+        return dy_dt
 
     def step(
         self,
@@ -294,15 +337,6 @@ class MVEM:
     ) -> None:
         """
         Advance the engine state by dt seconds.
-
-        Parameters
-        ----------
-        dt          : timestep [s]
-        params      : health-parameter dict (cd_inj, eta_v_scale, eta_c_scale,
-                      hA_scale, f_fric_scale)
-        atm         : atmosphere dict from twin.atmosphere.isa  {'T': K, 'p': Pa}
-        throttle_pct: throttle demand [%]
-        v_tas       : true airspeed [m/s] — used for propeller advance ratio
         """
         cd_inj       = np.array(params.get('cd_inj',       np.ones(self.N_cyl)))
         eta_v_scale  = params.get('eta_v_scale',  1.0)
@@ -313,120 +347,40 @@ class MVEM:
         p_atm = atm['p']
         T_atm = atm['T']
 
-        # Initialise p_im to the compressor map's pressure ratio at nominal
-        # turbo speed, evaluated at the current ambient. This puts the engine
-        # near its operating point from the first step instead of requiring a
-        # long bootstrap from ambient pressure.
         if self.p_im is None:
             _, pi_c_init, _ = self._compressor_operating_point(
                 self.w_tc, p_atm, T_atm, 1.0
             )
             self.p_im = p_atm * pi_c_init
 
-        sub_steps = 100
-        h = dt / sub_steps
+        # Create initial state vector
+        y0 = [self.p_im, self.w, self.w_tc] + self.T_cht.tolist()
 
-        for _ in range(sub_steps):
-            N_rpm = max(self.w * 60.0 / (2.0 * np.pi), 100.0)
+        args = (cd_inj, eta_v_scale, eta_c_scale, hA_scale, f_fric_scale, p_atm, T_atm, throttle_pct, v_tas, False)
+        
+        # Use a stiff ODE solver (Radau or BDF) to handle stiffness between intake dynamics and mechanical inertia
+        res = solve_ivp(
+            fun=self._ode_system,
+            t_span=(0.0, dt),
+            y0=y0,
+            method='Radau',
+            args=args,
+        )
 
-            # ── §2 Cylinder induction — speed-density ─────────────────────
-            eta_v  = self._lookup_eta_v(self.p_im, N_rpm) * eta_v_scale
-            self.m_a = (
-                eta_v * self.p_im * self.V_d * N_rpm
-                / (self.R * self.T_im * 120.0)
-            )
+        y_final = res.y[:, -1]
+        
+        # Update states
+        self.p_im = max(y_final[0], p_atm * 0.40)
+        self.w    = max(y_final[1], 10.0)
+        self.w_tc = max(y_final[2], 10.0)
+        self.T_cht = y_final[3:]
 
-            # Fuel command: throttle sets fuel rack directly (FADEC diesel).
-            # Maximum fuel is stoichiometric; throttle scales below that.
-            # This produces lean-burn (λ > 1) at partial throttle, which is
-            # physically correct for a compression-ignition aero-diesel.
-            target_m_f_total = (throttle_pct / 100.0) * self.m_a / self.AFR_st
-            self.fuel_cmd      = target_m_f_total / self.N_cyl
-            self.fuel_delivered = cd_inj * self.fuel_cmd
-            m_f_total          = float(np.sum(self.fuel_delivered))
-
-            self.lambda_val = self.m_a / (self.AFR_st * max(m_f_total, 1e-9))
-            T_ind_i = (
-                self.eta_i * self.fuel_delivered * self.Q_LHV
-                / max(self.w, 1.0)
-            )
-            T_ind = float(np.sum(T_ind_i))
-
-            # Friction: from YAML nominal, scaled by health parameter
-            T_fric = self.f_fric_nom * f_fric_scale * self.w / 100.0
-
-            # Propeller load — law: P = C_P(J) · ρ_air · n³ · D⁵
-            n_prop  = max(self.w / (2.0 * np.pi) * self.gear_ratio, 0.01)  # rev/s
-            J_adv   = v_tas / max(n_prop * self.D_prop, 0.01)
-            C_P     = self._lookup_cp(J_adv)
-            rho_air = p_atm / (self.R * T_atm)
-            P_prop  = C_P * rho_air * (n_prop ** 3) * (self.D_prop ** 5)
-            T_load  = P_prop / max(self.w, 1.0)
-
-            dw_dt = (T_ind - T_fric - T_load) / self.J
-            self.brake_power_kW = (T_ind - T_fric) * self.w / 1000.0
-
-            # Cylinder imbalance → 0.5-order crank ripple
-            mean_T_ind = float(np.mean(T_ind_i))
-            imbalance  = (
-                float(np.max(np.abs(T_ind_i - mean_T_ind)))
-                / max(mean_T_ind, 1e-9)
-            )
-            self.ripple = 0.004 + imbalance * 0.62
-
-            # ── §4 Cylinder head thermal ───────────────────────────────────
-            # Energy split: eta_i → indicated work, Q_ht_frac → coolant, rest → exhaust
-            # For a diesel: ~70% indicated, ~15% coolant, ~15% exhaust.
-            # A lean diesel has lower EGT; the exhaust fraction is modest but
-            # the large exhaust MASS FLOW (lean = excess air) drives the turbo.
-            Q_ht_frac  = 0.15                          # fraction to coolant
-            Q_gas_i    = Q_ht_frac * self.fuel_delivered * self.Q_LHV
-            h_air      = 50.0 * hA_scale
-            dT_cht_dt  = (
-                Q_gas_i - h_air * self.A_fin * (self.T_cht - self.T_cool)
-            ) / (self.m_cht * self.cp_cht)
-
-            # Exhaust enthalpy: fuel LHV minus indicated work minus heat to coolant
-            Q_ex_i  = self.fuel_delivered * self.Q_LHV * (1.0 - self.eta_i - Q_ht_frac)
-            Q_ex_i  = np.maximum(Q_ex_i, 0.0)         # cannot be negative
-            # Exhaust mass = air + fuel (all cylinders share the manifold air equally)
-            m_ex_i  = (self.m_a / self.N_cyl) + self.fuel_delivered
-            self.T_egt = T_atm + Q_ex_i / (m_ex_i * self.cp_ex)
-
-            # ── §5 Turbocharger — quasi-steady algebraic solve ─────────────
-            #
-            # Replaces the stiff explicit-Euler ODE that caused w_tc to
-            # collapse to its floor on every run. We lose turbo lag (which
-            # nothing in the demo depends on) and gain a state that cannot
-            # explode or enter an absorbing collapsed state.
-            #
-            # The turbine uses exhaust-manifold pressure, not p_im — the
-            # original code used p_im for both compressor and turbine, which
-            # is physically wrong and is one of the three diagnosed defects.
-            m_ex_total = float(np.sum(m_ex_i))
-            T_egt_mean = float(np.mean(self.T_egt))
-
-            self.w_tc, self.m_c, pi_c, eta_c = self._solve_turbo_quasisteady(
-                m_ex_total, T_egt_mean, p_atm, T_atm, eta_c_scale
-            )
-
-            # ── §1 Intake manifold — filling and emptying ─────────────────
-            # T_im from compressor outlet (isentropic + efficiency)
-            self.T_im = T_atm + (T_atm / max(eta_c, 0.01)) * (
-                pi_c ** ((self.gamma - 1.0) / self.gamma) - 1.0
-            )
-            dp_im_dt = (
-                (self.R * self.T_im / self.V_im) * (self.m_c - self.m_a)
-            )
-
-            # ── Integration ───────────────────────────────────────────────
-            self.w     += dw_dt   * h
-            self.p_im  += dp_im_dt * h
-            self.T_cht += dT_cht_dt * h
-
-            # Guards — w_tc is already set by the quasi-steady solver
-            self.w    = max(self.w,   10.0)
-            self.p_im = max(self.p_im, p_atm * 0.40)
+        # Run one final evaluation to populate the derived output properties
+        self._ode_system(
+            dt, y_final,
+            cd_inj, eta_v_scale, eta_c_scale, hA_scale, f_fric_scale, p_atm, T_atm, throttle_pct, v_tas,
+            update_derived=True
+        )
 
     # ── Outputs ────────────────────────────────────────────────────────────
 

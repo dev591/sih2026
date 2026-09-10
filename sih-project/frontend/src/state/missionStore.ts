@@ -65,6 +65,9 @@ interface MissionState {
   mode: Mode;
   /** Which drawer is slid out over the simple view. null = none. */
   drawer: Drawer | null;
+  /** Post-flight report sheet. Renders the frame under the scrubber, so
+   *  scrubbing back to detection and printing reports THAT instant. */
+  reportOpen: boolean;
 
   tick: () => MissionTick;
   setIndex: (i: number) => void;
@@ -85,6 +88,7 @@ interface MissionState {
   setMode: (m: Mode) => void;
   toggleMode: () => void;
   setDrawer: (d: Drawer | null) => void;
+  setReportOpen: (open: boolean) => void;
   setFeed: (source: FeedSource, error: string | null, frames: number) => void;
   /** Jump straight to a scripted beat — used by the demo shortcut bar. */
   seekTo: (t: number) => void;
@@ -105,6 +109,7 @@ export const useMission = create<MissionState>((set, get) => ({
   engine: VRDE_180,
   mode: storedMode(),
   drawer: null,
+  reportOpen: false,
 
   tick: () => {
     const { ticks, index } = get();
@@ -162,6 +167,11 @@ export const useMission = create<MissionState>((set, get) => ({
   },
   toggleMode: () => get().setMode(get().mode === 'simple' ? 'expert' : 'simple'),
   setDrawer: (drawer) => set({ drawer }),
+
+  // Pause on open: a report is of one instant, and a moving scrubber
+  // underneath it would print a different frame than the one reviewed.
+  setReportOpen: (reportOpen) =>
+    set(reportOpen ? { reportOpen, playing: false } : { reportOpen }),
 
   /** Swap the engine. Everything downstream — geometry, limits, critical
    *  altitude, which parity paths exist — follows from the profile, so this
