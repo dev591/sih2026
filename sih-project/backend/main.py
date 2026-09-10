@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import time
 import json
 from pathlib import Path
@@ -11,6 +12,20 @@ from twin.atmosphere import isa
 from twin.mvem import MVEM
 from twin.measurement import MeasurementModel
 from parity.residuals import compute_residuals
+
+# BE-2's models live at sih-project/ml, one level up from backend/.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    from ml.inference import InferencePipeline
+    ML_AVAILABLE = True
+except Exception as exc:                      # torch missing, weights absent…
+    # The socket must still serve schema-valid frames without the ML stack —
+    # docs/pitch/demo-script.md's fallback table assumes every layer can be
+    # dropped independently, and a laptop without torch should still light the
+    # dashboard rather than fail to boot.
+    print(f"[main] ML layer unavailable ({exc}); serving physics-only frames.")
+    InferencePipeline = None
+    ML_AVAILABLE = False
 
 app = FastAPI()
 
@@ -45,6 +60,10 @@ async def telemetry_endpoint(websocket: WebSocket):
     measureA = MeasurementModel(seed=42)
     measureB = MeasurementModel(seed=100)
     measureTwin = MeasurementModel(seed=999)
+
+    # Per-connection, like the plants above: the pipeline carries a rolling
+    # residual window and a UKF, so two judges on two tabs must not share one.
+    ml = InferencePipeline() if ML_AVAILABLE else None
     
     start_time = time.time()
     
@@ -220,7 +239,30 @@ async def telemetry_endpoint(websocket: WebSocket):
                 },
                 "limits_state": "green"
             }
-            
+
+            # ── Overlay BE-2's models on the stub blocks ──────────────────
+            # The stubs above stay as the fallback: if the ML layer is absent
+            # the frame is still schema-valid and the dashboard still lights.
+            # When it IS present, anomaly / diagnosis / rul / theta / novelty
+            # come from the models rather than from constants.
+            if ml is not None:
+                try:
+                    inferred = ml.run(
+                        rho,
+                        # dD/dt is BE-1's damage integrator (Day 3). Until it
+                        # exists the physics RUL head reports null rather than
+                        # a fabricated number — see ml/m3_rul/model.py.
+                        damage_state=0.0,
+                        damage_rate_per_hr=0.0,
+                    )
+                    health.update(inferred)
+                    # diagnosis.probe is part of the schema but is the active
+                    # diagnosis layer's field, which the ML block does not own.
+                    health["diagnosis"].setdefault("probe", None)
+                except Exception as exc:
+                    print(f"[main] inference failed, serving stub health: {exc}")
+
+
             payload = {
                 "slow": slow,
                 "fast": fast,

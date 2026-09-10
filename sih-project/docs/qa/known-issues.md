@@ -8,6 +8,49 @@ Last reviewed: **2026-09-09**.
 
 ---
 
+## SPEC-1 · `detonation` and `egt_sensor_drift` are structurally inseparable
+
+**Severity:** high · **Blocker:** no (handled) · **Owner:** BE-1 + BE-2 + spec
+
+Their rows in the fault incidence matrix are **identical** —
+`[0, 0, 0, 1, 0, 2, 2, 2, 2, 0, 0]`. This is not an implementation slip: the
+table in `docs/spec/residual-spec.md` §3 gives them the same excitation
+pattern, and `ml/incidence.py` and `frontend/src/analysis/incidence.ts` both
+mirror it faithfully. By the columns-differ criterion in §4, no method built
+on that matrix can separate them.
+
+**Why this one matters more than the other ambiguous pairs.** Detonation is a
+COMPONENT fault actively damaging the engine. EGT sensor drift is
+INSTRUMENTATION — the engine is fine. That is precisely the discrimination the
+3:00 demo beat is built on. Undeclared, the system could report
+"instrumentation fault, the engine is serviceable" for an engine that is
+detonating, or send a good engine to teardown for a forty-rupee thermocouple.
+
+Measured effect: `egt_sensor_drift` has the worst per-class recall in the
+confusion matrix at **0.20**, confused with `detonation` 142 times out of
+~240. The classifier is not failing — it is being asked to separate two
+things the physics contract says are the same.
+
+**Handled, as of the ML review.** `ml.incidence.inseparable_groups()` derives
+these groups from the matrix instead of assuming them, and the inference
+pipeline now:
+- refuses to assert `is_sensor_fault` when the top hypothesis is in such a group,
+- sets `ambiguous: true`,
+- returns `inseparable_from` naming the other candidate.
+
+That is the "the system knows which ambiguities its own structure cannot
+resolve, and probes only those" behaviour of `residual-spec.md` §5 — a
+strength when declared, a trap when not.
+
+**Still open for the team to decide:** whether ρ₁₁ (0.5-order ripple) or
+`fast.knock_intensity` should carry a non-zero entry for detonation. Physically
+a detonating cylinder is a combustion abnormality and a drifting thermocouple
+is not, so a channel almost certainly separates them — but changing an
+incidence row changes the contract for the frontend, the matcher and the
+novelty rank simultaneously, so **do not change it unilaterally.**
+
+---
+
 ## FE-2 · Fault Console has no effect while the feed is LIVE
 
 **Severity:** high · **Blocker:** for a live-backend demo only · **Owner:** BE-1, then frontend

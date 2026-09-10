@@ -293,7 +293,7 @@ export function FlightReport() {
             <table className="doc-table">
               <tbody>
                 <tr><td>Component</td><td className="num">{rul.component}</td></tr>
-                <tr><td>Physics head</td><td className="num">{fmt(rul.physics_h)} h</td></tr>
+                <tr><td>Physics head</td><td className="num">{rul.physics_h === null ? 'not reported' : `${fmt(rul.physics_h)} h`}</td></tr>
                 <tr><td>Network head</td><td className="num">{fmt(rul.network_h)} h</td></tr>
                 <tr><td>Interval p10–p90</td><td className="num">{fmt(rul.p10_h)}–{fmt(rul.p90_h)} h</td></tr>
                 <tr className="row-strong">

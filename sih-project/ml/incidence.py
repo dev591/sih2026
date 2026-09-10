@@ -103,3 +103,51 @@ def build_fault_matrix_expanded() -> tuple[np.ndarray, list[str]]:
 
     F_exp = np.column_stack(columns)    # (11, M)
     return F_exp, labels
+
+
+# ── Structural isolability ────────────────────────────────────────────────
+
+def inseparable_groups(tol: float = 0.0) -> list[list[str]]:
+    """
+    Fault modes whose incidence rows are identical, i.e. that NO method can
+    separate from steady-state parity — the columns-differ test of
+    residual-spec.md §4, applied to our own matrix rather than asserted.
+
+    This currently returns {detonation, egt_sensor_drift}: both are
+    [0,0,0,1,0, 2,2,2,2, 0,0]. That pair matters more than the others because
+    one is a COMPONENT fault and the other is INSTRUMENTATION — the exact
+    discrimination the 3:00 demo beat is built on. Reporting either one
+    confidently would mean telling a commander the engine is serviceable while
+    it detonates, or pulling a good engine for a forty-rupee thermocouple.
+
+    The architecture already has the answer (residual-spec.md §5): when
+    structure cannot resolve, say so and let the active-diagnosis probe settle
+    it by commanding a bounded fuel-trim perturbation and testing the GAIN of
+    the response. A transducer's constant bias cancels from the alternating
+    component; a real detonation does not.
+    """
+    import numpy as _np
+    names = list(INCIDENCE.keys())
+    rows = {k: _np.asarray(v, dtype=float) for k, v in INCIDENCE.items()}
+    groups: list[list[str]] = []
+    used: set[str] = set()
+    for i, a in enumerate(names):
+        if a in used:
+            continue
+        grp = [a]
+        for b in names[i + 1:]:
+            if b in used:
+                continue
+            if _np.max(_np.abs(rows[a] - rows[b])) <= tol:
+                grp.append(b)
+                used.add(b)
+        if len(grp) > 1:
+            used.add(a)
+            groups.append(grp)
+    return groups
+
+
+#: Precomputed once — {fault: frozenset(of faults it cannot be told apart from)}
+AMBIGUITY_GROUPS: dict[str, frozenset] = {
+    f: frozenset(g) for g in inseparable_groups() for f in g
+}

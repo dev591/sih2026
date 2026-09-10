@@ -56,7 +56,12 @@ THETA_MAX = np.array([1.2, 1.2, 1.5,  1.1, 1.1, 1.1, 1.1,  2.0], dtype=float)
 
 @dataclass
 class UKFConfig:
-    alpha: float = 1e-3          # spread of sigma points
+    # alpha=1e-3 is the right choice for a strongly nonlinear process, but here
+    # it makes (n+λ) ≈ 8e-6: the sigma points collapse onto the mean and the
+    # weights blow up to ~1e6, which is numerically hopeless. Our observation
+    # map is near-linear in θ, so alpha=1 (λ=0) is both valid and well
+    # conditioned — all weights land non-negative at 1/(2n).
+    alpha: float = 1.0           # spread of sigma points
     beta: float  = 2.0           # prior knowledge (Gaussian → β=2 optimal)
     kappa: float = 0.0           # secondary scaling
     # Process noise — slow random walk: small to reflect slow degradation
@@ -102,7 +107,11 @@ class HealthUKF:
 
         # State: mean and covariance
         self.theta = THETA_NOM.copy()
-        self.P = np.eye(n) * 0.01           # initial uncertainty
+        # sigma spread is sqrt((n+λ)·P_ii) = sqrt(8·0.0025) ≈ 0.14, which keeps
+        # the points inside THETA_MIN/MAX. At 0.01 the spread was 0.28 and the
+        # clamp truncated most of them, biasing the covariance it is meant to
+        # represent.
+        self.P = np.eye(n) * 0.0025         # initial uncertainty
 
         # Process noise covariance
         self.Q = np.eye(n) * self.cfg.q_theta
@@ -114,14 +123,32 @@ class HealthUKF:
         self._nis_history: list[float] = []
 
     def _sigma_points(self) -> np.ndarray:
-        """Generate 2n+1 sigma points around current estimate."""
+        """
+        Generate 2n+1 sigma points around the current estimate.
+
+        Each pair perturbs ONE direction — the i-th column of the matrix square
+        root of (n+λ)P. This previously added the whole sqrt(diag(P)) vector to
+        every point, which collapsed 17 sigma points down to 3 and left the
+        filter able to move θ only along the all-ones direction. The visible
+        symptom was every health parameter reporting an identical value however
+        the residuals moved, which made θ carry no diagnostic information at
+        all — the opposite of the claim it exists to support.
+        """
         n = N_THETA
-        scale = np.sqrt((n + self.lambda_) * np.diag(self.P))
+        M = (n + self.lambda_) * self.P
+        try:
+            S = np.linalg.cholesky(M)
+        except np.linalg.LinAlgError:
+            # P can lose positive-definiteness numerically; fall back to a
+            # symmetric eigen decomposition with negatives floored at zero.
+            w, V = np.linalg.eigh((M + M.T) / 2.0)
+            S = V @ np.diag(np.sqrt(np.clip(w, 0.0, None)))
+
         sp = np.zeros((2 * n + 1, n))
         sp[0] = self.theta
         for i in range(n):
-            sp[i + 1]     = self.theta + scale
-            sp[n + i + 1] = self.theta - scale
+            sp[i + 1]     = self.theta + S[:, i]
+            sp[n + i + 1] = self.theta - S[:, i]
         # Clamp to physical bounds
         sp = np.clip(sp, THETA_MIN, THETA_MAX)
         return sp
@@ -150,12 +177,23 @@ class HealthUKF:
         rho[0] += -3.0 * delta[0]           # rho1
         # η_c deviation → ρ₁ (compressor map under-reads when η_c drops)
         rho[0] += 2.0 * delta[1]            # rho1 (opposite sign to η_v)
-        # hA → ρ₄ energy closure
-        rho[3] += 1.5 * delta[2]            # rho4
-        # cd_inj_i → ρ₂ and per-cylinder ρ₆-9
+        # hA → ρ₄ energy closure, ρ₆-9 thermal, ρ₁₀ oil.
+        # Cooling fouling drops hA and the incidence table puts rho4 UP, so the
+        # coefficient is NEGATIVE. It was +1.5, which had the filter raising hA
+        # for a cooling fault — the wrong direction.
+        rho[3] += -1.5 * delta[2]           # rho4
+        for c in range(4):
+            rho[5 + c] += -0.6 * delta[2]   # rho6..rho9 run hot as hA falls
+        rho[9] += -0.8 * delta[2]           # rho10
+
+        # cd_inj_i → ρ₂ (aggregate fuel/lambda) and per-cylinder ρ₆-9.
+        # Fouling REDUCES the discharge coefficient; the incidence table puts
+        # rho2 DOWN and that cylinder's rho6-9 UP. Both signs were inverted, so
+        # the filter reported cd_inj ABOVE nominal for a fouling signature —
+        # i.e. an injector flowing more than new, while diagnosing a clog.
         for c, idx in enumerate([3, 4, 5, 6]):
-            rho[1]    += -2.0 * delta[idx]  # rho2
-            rho[5 + c] += 2.0 * delta[idx]  # rho6..rho9
+            rho[1]    += 2.0 * delta[idx]   # rho2
+            rho[5 + c] += -2.0 * delta[idx] # rho6..rho9
         # f_fric → ρ₅
         rho[4] += 2.0 * delta[7]            # rho5
 
@@ -216,6 +254,13 @@ class HealthUKF:
             K = Pxz @ np.linalg.inv(Pzz_used)  # Kalman gain (n, 11)
         except np.linalg.LinAlgError:
             K = np.zeros((n, 11))
+
+        # Missing channels were given a unit diagonal above purely to keep Pzz
+        # invertible. Their gain columns must be zeroed or the covariance update
+        # below credits the filter with information from a channel it never
+        # observed — and on the VRDE rho3 is ALWAYS null, so this fired on every
+        # single step.
+        K[:, ~obs_mask] = 0.0
 
         innovation = z_meas - z_pred
         innovation[~obs_mask] = 0.0         # mask missing channels

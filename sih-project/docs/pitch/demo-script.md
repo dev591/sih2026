@@ -56,8 +56,16 @@ present, oil untouched — matched against the signature row. Show the network
 and the physics **agreeing**.
 
 > *"The network gives us the accuracy. The incidence matrix gives us the why.
-> Two independent mechanisms, same answer — and their agreement is itself
-> evidence."*
+> Two mechanisms, same answer."*
+
+**Do not say "independent" here.** The classifier is trained on residuals drawn
+around the incidence signatures, so the two are related by construction. What
+IS defensible: the training samples are jittered off the nominal columns, so
+the agreement rate is a *measured* number (see
+`ml/weights/m3_classifier_report.json`) rather than a guarantee — quote that
+number if asked. An evaluator who knows parity-space FDI will ask how the
+classifier was trained, and "independent" is the one word that does not
+survive the answer.
 
 Judges remember the *why*.
 

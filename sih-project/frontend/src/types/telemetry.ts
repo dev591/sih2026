@@ -171,7 +171,10 @@ export interface ActiveProbe {
 
 export interface RulEstimate {
   component: string;
-  physics_h: number;         // damage-rate integration forward
+  /** Damage-rate integration forward. NULL when BE-1's damage integrator has
+   *  supplied no rate yet — the head has not reported, which is different from
+   *  it reporting an unbounded life. */
+  physics_h: number | null;
   network_h: number;         // quantile-regression p50
   p10_h: number;
   p50_h: number;

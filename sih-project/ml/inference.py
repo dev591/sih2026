@@ -29,7 +29,7 @@ from ml.m3_classifier.model import M3ClassifierModel, diagnose
 from ml.m3_rul.model import RULModel, rul_report, physics_rul
 from ml.novelty.projection import NoveltyProjector
 from ml.ukf.filter import HealthUKF
-from ml.incidence import N_RESIDUALS, FAULT_NAMES
+from ml.incidence import N_RESIDUALS, FAULT_NAMES, AMBIGUITY_GROUPS
 
 WEIGHTS_DIR = Path(__file__).parent / "weights"
 
@@ -140,11 +140,42 @@ class InferencePipeline:
             rul_q = self.m3_rul(window_t).squeeze(0).cpu().numpy()  # [p10,p50,p90]
 
         top_diag  = diagnose(rho_nn, probs)[:top_k]
+
+        # M2 DETECTS, M3 ISOLATES — and M3's class list contains only faults,
+        # so left ungated it always names one. On a healthy engine it returned
+        # whichever fault fit the noise best (fuel_filter_clog at p=0.385 in
+        # testing) while every limit sat green, which is precisely the frame
+        # the demo opens on. Isolation is only meaningful once detection has
+        # actually fired: until the N-of-M persistence rule is met, the
+        # finding is 'healthy'. This is the architecture in ML-DEEP-DIVE §2,
+        # not a display hack.
+        if not alarm:
+            top_diag = [{"fault": "healthy", "p_combined": 1.0 - min(ae_err / self.anomaly_threshold, 1.0),
+                         "source": "classifier+matrix"}]
+
         top_fault = top_diag[0]["fault"] if top_diag else "unknown"
 
         instr = {"map_sensor_drift", "egt_sensor_drift",
                  "cht_sensor_drift", "lambda_sensor_drift"}
         is_sensor = top_fault in instr
+
+        # STRUCTURAL ambiguity, checked against our own matrix rather than
+        # assumed. detonation and egt_sensor_drift have identical incidence
+        # rows, so no amount of confidence in the classifier justifies calling
+        # one over the other — and that particular pair straddles the
+        # component/instrumentation line the whole diagnosis rests on.
+        # Asserting either would mean either clearing an engine that is
+        # detonating, or pulling a serviceable one for a drifting thermocouple.
+        # When the top hypothesis sits in an inseparable group we refuse the
+        # call, flag it, and hand it to the active-diagnosis probe, which is
+        # what residual-spec.md §5 exists for.
+        group = AMBIGUITY_GROUPS.get(top_fault)
+        structurally_ambiguous = group is not None
+
+        numeric_ambiguous = bool(
+            len(top_diag) >= 2 and
+            abs(top_diag[0]["p_combined"] - top_diag[1]["p_combined"]) < 0.15
+        )
 
         diagnosis_block = {
             "top": [
@@ -152,12 +183,17 @@ class InferencePipeline:
                  "source": d["source"]}
                 for d in top_diag
             ],
-            "is_sensor_fault": is_sensor,
+            # Only assert instrumentation when the structure can actually
+            # support it. Inside an inseparable group it cannot.
+            "is_sensor_fault": bool(is_sensor and not structurally_ambiguous),
             "ambiguous": bool(
-                len(top_diag) >= 2 and
-                abs(top_diag[0]["p_combined"] - top_diag[1]["p_combined"]) < 0.15
+                top_fault != "healthy"
+                and (structurally_ambiguous or numeric_ambiguous)
             ),
         }
+
+        if top_fault != "healthy" and structurally_ambiguous:
+            diagnosis_block["inseparable_from"] = sorted(group - {top_fault})
 
         phys = physics_rul(damage_state, damage_rate_per_hr)
         rul_block = rul_report(

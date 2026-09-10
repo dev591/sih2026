@@ -189,15 +189,62 @@ def train_m3_classifier(args, dataset, weights_dir: Path):
     )
     train_classifier(model, loader, epochs=args.epochs_m3, device=args.device)
 
-    # Quick training-set accuracy
+    # HELD-OUT evaluation. Accuracy on the training loader is not evidence of
+    # anything — it was previously the only number reported, and it went into
+    # the handoff as if it were a result.
+    import json as _json
+    import numpy as _np
+    from ml.incidence import FAULT_NAMES as _FN, N_RESIDUALS as _NR
+    from ml.m3_classifier.model import incidence_match as _match
+
     model.eval()
-    correct, total = 0, 0
+    n_cls = len(_FN)
+    cm = _np.zeros((n_cls, n_cls), dtype=int)
+    correct = total = 0
+    top2_correct = 0
+    agree = 0
+
+    val_loader = DataLoader(dataset.faulty_val, batch_size=args.batch_size)
     with torch.no_grad():
-        for x, y in loader:
-            preds = model(x.to(args.device)).argmax(1).cpu()
-            correct += (preds == y).sum().item()
-            total   += y.size(0)
-    print(f"  [M3-cls] train accuracy = {correct/total:.3f}")
+        for x, y in val_loader:
+            logits = model(x.to(args.device)).cpu()
+            preds  = logits.argmax(1)
+            top2   = logits.topk(min(2, n_cls), dim=1).indices
+            for i in range(y.size(0)):
+                cm[y[i].item(), preds[i].item()] += 1
+                total += 1
+                correct      += int(preds[i].item() == y[i].item())
+                top2_correct += int(y[i].item() in top2[i].tolist())
+                # Independent mechanism: cosine match on the LAST frame of the
+                # window. Agreement is now a measured rate, not a guarantee.
+                rho_last = x[i, -1, :].numpy().astype(float)
+                agree += int(int(_np.argmax(_match(rho_last))) == preds[i].item())
+
+    acc      = correct / max(total, 1)
+    top2_acc = top2_correct / max(total, 1)
+    agree_rt = agree / max(total, 1)
+    print(f"  [M3-cls] HELD-OUT top-1 = {acc:.3f}   top-2 = {top2_acc:.3f}   "
+          f"(n={total})")
+    print(f"  [M3-cls] classifier-vs-matrix agreement = {agree_rt:.3f}")
+
+    report = {
+        "held_out_top1": round(acc, 4),
+        "held_out_top2": round(top2_acc, 4),
+        "n_held_out": int(total),
+        "classifier_matrix_agreement": round(agree_rt, 4),
+        "classes": list(_FN),
+        "confusion_matrix": cm.tolist(),
+        "note": (
+            "Accuracy is on ml/data/synthetic.py's held-out fault split "
+            "(faulty_val, separate RNG stream, never trained on). Training "
+            "samples are jittered off the incidence columns, so the "
+            "classifier-vs-matrix agreement rate is a measured result rather "
+            "than a construction artefact. This is still SYNTHETIC data — it "
+            "is not evidence of performance on the real engine."
+        ),
+    }
+    (weights_dir / "m3_classifier_report.json").write_text(_json.dumps(report, indent=2))
+    print(f"  Saved → {weights_dir / 'm3_classifier_report.json'}")
 
     out = weights_dir / "m3_classifier_weights.pt"
     torch.save(model.state_dict(), out)

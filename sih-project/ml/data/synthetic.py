@@ -74,6 +74,7 @@ def generate_fault_windows(
     fault_magnitude_range: tuple[float, float] = (2.0, 6.0),
     onset_fraction: float = 0.25,
     phi: float = 0.3,
+    direction_jitter: float = 0.30,
     rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -112,12 +113,25 @@ def generate_fault_windows(
             magnitude = rng.uniform(*fault_magnitude_range)
             noise = _ar1_window(window_len, N_RESIDUALS, phi=phi, rng=rng) * noise_std
 
+            # Per-sample DIRECTION JITTER. Without it every training sample lay
+            # exactly along a column of the incidence matrix — the same matrix
+            # the cosine matcher scores against — so the classifier could only
+            # ever learn to reproduce it, and the "two independent mechanisms
+            # agree" claim was true by construction rather than by evidence.
+            # Jittering makes the classifier learn a REGION around each
+            # signature, so agreement with the matcher becomes a real result.
+            # It also reflects reality: a fouled injector does not produce a
+            # textbook column, it produces something near one.
+            jitter = rng.standard_normal(N_RESIDUALS) * direction_jitter
+            dir_s = fault_dir_unit + jitter
+            dir_s = dir_s / max(np.linalg.norm(dir_s), 1e-9)
+
             # Severity ramp: 0 → magnitude over onset_steps, then held.
             ramp = np.minimum(
                 np.arange(window_len) / onset_steps, 1.0
             ) * magnitude                     # (window_len,)
 
-            signal = ramp[:, None] * fault_dir_unit[None, :]   # (window_len, 11)
+            signal = ramp[:, None] * dir_s[None, :]            # (window_len, 11)
             window = (signal + noise).astype(np.float32)
 
             all_X.append(window)
@@ -137,6 +151,7 @@ class SyntheticResidualDataset:
     healthy         TensorDataset of (X,)  — reconstruction training for M2
     healthy_val     TensorDataset of (X,)  — held-out for threshold calibration
     faulty          TensorDataset of (X, y) — supervised training for M3
+    faulty_val      TensorDataset of (X, y) — HELD OUT, never trained on
     n_fault_classes int — number of base fault classes (len(FAULT_NAMES))
     """
 
@@ -145,6 +160,7 @@ class SyntheticResidualDataset:
         n_healthy: int = 800,
         n_healthy_val: int = 200,
         n_fault_per_class: int = 300,
+        n_fault_per_class_val: int = 100,
         window_len: int = 32,
         noise_std: float = 1.0,
         fault_magnitude_range: tuple[float, float] = (2.0, 6.0),
@@ -152,6 +168,7 @@ class SyntheticResidualDataset:
         rng_h = np.random.default_rng(10)
         rng_hv = np.random.default_rng(11)
         rng_f = np.random.default_rng(12)
+        rng_fv = np.random.default_rng(13)
 
         X_h = generate_healthy_windows(n_healthy, window_len, noise_std, rng=rng_h)
         X_hv = generate_healthy_windows(n_healthy_val, window_len, noise_std, rng=rng_hv)
@@ -160,14 +177,25 @@ class SyntheticResidualDataset:
             fault_magnitude_range=fault_magnitude_range, rng=rng_f
         )
 
+        # Separate RNG stream, so the held-out fault set shares no samples with
+        # the training set. M2's threshold already used a held-out healthy
+        # split; M3 had no equivalent, so its reported accuracy was measured on
+        # the very data it fit.
+        X_fv, y_fv = generate_fault_windows(
+            n_fault_per_class_val, window_len, noise_std,
+            fault_magnitude_range=fault_magnitude_range, rng=rng_fv
+        )
+
         self.healthy = TensorDataset(torch.from_numpy(X_h))
         self.healthy_val = TensorDataset(torch.from_numpy(X_hv))
         self.faulty = TensorDataset(torch.from_numpy(X_f), torch.from_numpy(y_f))
+        self.faulty_val = TensorDataset(torch.from_numpy(X_fv), torch.from_numpy(y_fv))
         self.n_fault_classes = len(FAULT_NAMES)
         self.window_len = window_len
 
         print(
             f"[SyntheticResidualDataset] "
             f"healthy={len(self.healthy)}  val={len(self.healthy_val)}  "
-            f"faulty={len(self.faulty)}  classes={self.n_fault_classes}"
+            f"faulty={len(self.faulty)}  faulty_val={len(self.faulty_val)}  "
+            f"classes={self.n_fault_classes}"
         )

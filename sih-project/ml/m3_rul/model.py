@@ -71,7 +71,7 @@ def physics_rul(
     damage_state: float,
     damage_rate_per_hr: float,
     min_rul_h: float = 0.1,
-) -> float:
+) -> float | None:
     """
     Integrate the current damage rate forward to predict RUL.
 
@@ -82,8 +82,14 @@ def physics_rul(
     damage_state       D ∈ [0, 1] — current accumulated damage (from UKF / BE-1)
     damage_rate_per_hr dD/dt in 1/hr — current rate (from BE-1's damage model)
     """
+    # No damage rate means the physics head has NOTHING to integrate — it has
+    # not produced an estimate. Returning inf claimed an infinite life, made
+    # heads_disagree permanently true, and serialised as `Infinity`, which is
+    # not valid JSON and would have failed JSON.parse in the dashboard.
+    # dD/dt arrives from BE-1's damage integrator (Day 3); until then this
+    # head is honestly absent rather than infinitely optimistic.
     if damage_rate_per_hr <= 0:
-        return float("inf")
+        return None
     remaining = max(0.0, 1.0 - damage_state)
     return max(remaining / damage_rate_per_hr, min_rul_h)
 
@@ -94,7 +100,7 @@ def rul_report(
     p10: float,
     p50: float,
     p90: float,
-    physics_h: float,
+    physics_h: float | None,
     component: str = "unknown",
     threshold_disagree: float = 2.0,
 ) -> dict:
@@ -104,13 +110,19 @@ def rul_report(
     Advises on the conservative head (usually network p50 when < physics_h).
     Flags heads_disagree when the gap exceeds the predictive interval.
     """
-    reported_h = min(p50, physics_h)
     interval_half = (p90 - p10) / 2.0
-    heads_disagree = abs(p50 - physics_h) > max(interval_half * threshold_disagree, 0.5)
+    if physics_h is None:
+        # Advise on the only head that reported. Two heads cannot disagree when
+        # one of them has not spoken.
+        reported_h = p50
+        heads_disagree = False
+    else:
+        reported_h = min(p50, physics_h)
+        heads_disagree = abs(p50 - physics_h) > max(interval_half * threshold_disagree, 0.5)
 
     return {
         "component":      component,
-        "physics_h":      round(physics_h, 2),
+        "physics_h":      None if physics_h is None else round(physics_h, 2),
         "network_h":      round(p50, 2),
         "p10_h":          round(p10, 2),
         "p50_h":          round(p50, 2),

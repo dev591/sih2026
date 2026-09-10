@@ -321,7 +321,7 @@ export function RulPanel() {
         </div>
       </div>
       <div className="metric-grid">
-        <Metric label="Physics head" value={rul.physics_h.toFixed(1)} unit="h" />
+        <Metric label="Physics head" value={rul.physics_h === null ? '—' : rul.physics_h.toFixed(1)} unit="h" />
         <Metric label="Network head" value={rul.network_h.toFixed(1)} unit="h" />
         <Metric
           label="Advised on"
