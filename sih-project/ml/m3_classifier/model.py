@@ -3,7 +3,14 @@ M3 — Fault Classifier.
 
 1D-CNN over a residual window → softmax across fault classes.
 Runs ALONGSIDE the incidence-matrix cosine-similarity match (not instead
-of it). Agreement between two independent mechanisms is itself evidence.
+of it). The two are NOT statistically independent — training samples are
+generated around the incidence columns (ml/data/synthetic.py), so a
+classifier that reproduced the matrix exactly would prove nothing.
+Training samples are jittered off the nominal columns by a MEASURED
+amount (see synthetic.py's direction_jitter), which is what makes the
+classifier-vs-matrix agreement rate a real, measured quantity
+(ml/weights/m3_classifier_report.json) rather than a guarantee. Quote
+that measured rate; do not claim independence.
 
 RUL heads live in ../m3_rul/model.py — separate artefact, separate weights.
 
@@ -32,17 +39,30 @@ class ResidualCNNEncoder(nn.Module):
     def __init__(self, input_dim: int = N_RESIDUALS):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv1d(input_dim, 32, kernel_size=3, padding=1),
+            nn.Conv1d(input_dim, 48, kernel_size=3, padding=1),
+            nn.BatchNorm1d(48),
             nn.ReLU(),
-            nn.Conv1d(32, 64, kernel_size=3, padding=1),
+            nn.Conv1d(48, 96, kernel_size=3, padding=1),
+            nn.BatchNorm1d(96),
             nn.ReLU(),
-            nn.AdaptiveAvgPool1d(4),   # → (B, 64, 4)
+            nn.AdaptiveAvgPool1d(4),   # → (B, 96, 4)
         )
-        self.feature_dim = 64 * 4      # 256
+        self.feature_dim = 96 * 4      # 384
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, 11) → permute to (B, 11, T) for Conv1d
-        return self.conv(x.permute(0, 2, 1)).flatten(1)   # (B, 256)
+        # x: (B, T, 11)
+        #
+        # SCALE-NORMALISE THE WINDOW FIRST. Which fault it is lives in the
+        # DIRECTION of rho; magnitude carries severity, a nuisance variable
+        # for classification (2-6 sigma range in training). Feeding raw
+        # magnitudes made the network spend capacity learning scale-
+        # invariance it should never have needed — residual-spec.md
+        # identifies a fault by which relations depart and with what sign,
+        # not by how far.
+        scale = x.norm(dim=(1, 2), keepdim=True).clamp_min(1e-6)
+        x = x / scale
+        # → permute to (B, 11, T) for Conv1d
+        return self.conv(x.permute(0, 2, 1)).flatten(1)
 
 
 # ── Classifier head ───────────────────────────────────────────────────────
@@ -142,8 +162,8 @@ def diagnose(
 def train_classifier(
     model: M3ClassifierModel,
     train_loader,
-    epochs: int = 60,
-    lr: float = 5e-4,
+    epochs: int = 120,
+    lr: float = 2e-3,
     device: str = "cpu",
 ) -> list[float]:
     model.to(device)

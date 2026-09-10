@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device",     default="cpu", choices=["cpu", "cuda", "mps"])
     p.add_argument("--epochs-m1",  type=int, default=40)
     p.add_argument("--epochs-m2",  type=int, default=50)
-    p.add_argument("--epochs-m3",  type=int, default=60)
+    p.add_argument("--epochs-m3",  type=int, default=120)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--window-len", type=int, default=32)
     return p.parse_args()

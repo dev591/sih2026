@@ -1,15 +1,17 @@
 {
-  "pooled_jitter_median": 0.2439,
-  "pooled_jitter_p90": 0.4472,
-  "n_total_samples": 37,
+  "pooled_jitter_median": 0.3968,
+  "pooled_jitter_p90": 1.8387,
+  "n_total_samples": 60,
   "per_fault": {
     "injector_fouling": {
-      "jitter_median": null,
-      "note": "no usable residual"
+      "jitter_median": 1.7451,
+      "jitter_p90": 2.0841,
+      "n_samples": 16
     },
     "turbo_degradation": {
-      "jitter_median": null,
-      "note": "no usable residual"
+      "jitter_median": 1.3083,
+      "jitter_p90": 1.3316,
+      "n_samples": 4
     },
     "cooling_fouling": {
       "jitter_median": 0.4472,
@@ -17,22 +19,22 @@
       "n_samples": 4
     },
     "bearing_wear": {
+      "jitter_median": 0.7368,
+      "jitter_p90": 0.7398,
+      "n_samples": 4
+    },
+    "ring_wear": {
       "jitter_median": null,
       "note": "no usable residual"
     },
-    "ring_wear": {
-      "jitter_median": 4.5926,
-      "jitter_p90": 4.5926,
-      "n_samples": 1
-    },
     "cht_sensor_drift": {
-      "jitter_median": 0.1867,
-      "jitter_p90": 0.1992,
+      "jitter_median": 0.3804,
+      "jitter_p90": 0.3968,
       "n_samples": 16
     },
     "egt_sensor_drift": {
-      "jitter_median": 0.2606,
-      "jitter_p90": 0.2717,
+      "jitter_median": 0.2617,
+      "jitter_p90": 0.269,
       "n_samples": 16
     }
   },

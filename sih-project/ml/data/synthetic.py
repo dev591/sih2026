@@ -164,6 +164,18 @@ class SyntheticResidualDataset:
         window_len: int = 32,
         noise_std: float = 1.0,
         fault_magnitude_range: tuple[float, float] = (2.0, 6.0),
+        # provenance: MEASURED, not guessed. This was 0.30 (invented, no
+        # empirical basis, and it turned out to set the classifier's oracle
+        # ceiling almost single-handedly: 0.00->0.871, 0.20->0.799,
+        # 0.30->0.644, 0.40->0.497). ml/data/measure_jitter.py perturbs
+        # BE-1's actual MVEM per fault type and measures how far the real
+        # resulting residual direction sits from the nominal incidence
+        # column. First attempt (air path still collapsed) was
+        # inconclusive — component faults barely moved anything real.
+        # Re-run after the air-path fix: pooled median 0.3968 across
+        # injector/turbo/cooling/bearing/cht/egt (n=60,
+        # ml/data/jitter_report.json). Rounded to 0.40.
+        direction_jitter: float = 0.40,
     ):
         rng_h = np.random.default_rng(10)
         rng_hv = np.random.default_rng(11)
@@ -174,7 +186,8 @@ class SyntheticResidualDataset:
         X_hv = generate_healthy_windows(n_healthy_val, window_len, noise_std, rng=rng_hv)
         X_f, y_f = generate_fault_windows(
             n_fault_per_class, window_len, noise_std,
-            fault_magnitude_range=fault_magnitude_range, rng=rng_f
+            fault_magnitude_range=fault_magnitude_range,
+            direction_jitter=direction_jitter, rng=rng_f
         )
 
         # Separate RNG stream, so the held-out fault set shares no samples with
@@ -183,8 +196,10 @@ class SyntheticResidualDataset:
         # the very data it fit.
         X_fv, y_fv = generate_fault_windows(
             n_fault_per_class_val, window_len, noise_std,
-            fault_magnitude_range=fault_magnitude_range, rng=rng_fv
+            fault_magnitude_range=fault_magnitude_range,
+            direction_jitter=direction_jitter, rng=rng_fv
         )
+        self.direction_jitter = direction_jitter
 
         self.healthy = TensorDataset(torch.from_numpy(X_h))
         self.healthy_val = TensorDataset(torch.from_numpy(X_hv))
