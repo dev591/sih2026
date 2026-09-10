@@ -1,0 +1,52 @@
+{
+  "pooled_jitter_median": 0.2439,
+  "pooled_jitter_p90": 0.4472,
+  "n_total_samples": 37,
+  "per_fault": {
+    "injector_fouling": {
+      "jitter_median": null,
+      "note": "no usable residual"
+    },
+    "turbo_degradation": {
+      "jitter_median": null,
+      "note": "no usable residual"
+    },
+    "cooling_fouling": {
+      "jitter_median": 0.4472,
+      "jitter_p90": 0.4472,
+      "n_samples": 4
+    },
+    "bearing_wear": {
+      "jitter_median": null,
+      "note": "no usable residual"
+    },
+    "ring_wear": {
+      "jitter_median": 4.5926,
+      "jitter_p90": 4.5926,
+      "n_samples": 1
+    },
+    "cht_sensor_drift": {
+      "jitter_median": 0.1867,
+      "jitter_p90": 0.1992,
+      "n_samples": 16
+    },
+    "egt_sensor_drift": {
+      "jitter_median": 0.2606,
+      "jitter_p90": 0.2717,
+      "n_samples": 16
+    }
+  },
+  "unmeasurable_faults": [
+    "detonation",
+    "fuel_filter_clog",
+    "ignition_misfire",
+    "lambda_sensor_drift",
+    "map_sensor_drift",
+    "oil_pump_wear"
+  ],
+  "dead_residual_channels": [
+    "rho1",
+    "rho5"
+  ],
+  "caveat": "Measured against BE-1's MVEM at the commit noted below. Channels listed in dead_residual_channels sit on the sigma floor because the air path is collapsed (docs/qa/known-issues.md), so faults living mainly on them are under-measured. Faults in unmeasurable_faults have no parameter hook in the current MVEM and are NOT estimated \u2014 the pooled value is used for them, and that substitution is recorded here rather than hidden. Re-run after BE-1's Task 0."
+}

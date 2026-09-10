@@ -1,0 +1,134 @@
+"""
+PRAMANA-DIRECTIVE-2026-09-10.md §1.7 — the six P0 acceptance gates.
+
+Runs the VRDE profile at 18,000 ft / 72% throttle to steady state and checks
+all six gates. Prints PASS/FAIL for each with the measured value, never just
+a checkmark. All six must pass before any ML retraining.
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from twin.profiles import load_engine_profile
+from twin.mvem import MVEM
+from twin.atmosphere import isa
+from twin.measurement import MeasurementModel
+from parity.residuals import compute_residuals
+
+ALT_FT, THROTTLE, CRUISE_RPM_TARGET = 18000.0, 72.0, 3580.0
+
+
+def run_to_steady_state(cfg, alt_ft, throttle, seconds=180):
+    atm = isa(alt_ft)
+    plant = MVEM(cfg)
+    nominal = {
+        'cd_inj': [1.0] * cfg['geometry']['cylinders'],
+        'eta_v_scale': 1.0, 'eta_c_scale': 1.0,
+        'hA_scale': 1.0, 'f_fric_scale': 1.0,
+    }
+    for t in range(seconds):
+        plant.step(1.0, nominal, atm, throttle)
+    return plant, atm
+
+
+def main():
+    cfg = load_engine_profile("engine_vrde_180.yaml")
+    rated_kW = cfg['ratings']['rated_power_kW']
+
+    print(f"Running VRDE to steady state at {ALT_FT:.0f} ft / {THROTTLE:.0f}% throttle...")
+    plant, atm = run_to_steady_state(cfg, ALT_FT, THROTTLE)
+    out = plant.get_outputs()
+
+    p_im_bar = out['map_hPa'] * 100.0 / 1e5
+    turbo_rpm = out['turbo_rpm']
+    rpm = out['rpm']
+    power_kW = out['brake_power_kW']
+    power_frac = power_kW / rated_kW
+
+    results = []
+
+    g1 = 0.9 <= p_im_bar <= 1.4
+    results.append(("1", "MAP at 18kft/72%", f"{p_im_bar:.3f} bar", "[0.9, 1.4] bar", g1))
+
+    g2 = 80_000 <= turbo_rpm <= 160_000
+    results.append(("2", "Turbo speed", f"{turbo_rpm:,.0f} rpm", "[80k, 160k] rpm, off any floor", g2))
+
+    rpm_dev = abs(rpm - CRUISE_RPM_TARGET) / CRUISE_RPM_TARGET
+    g3 = (power_frac >= 0.60) and (rpm_dev <= 0.05)
+    results.append(("3", "Shaft power & speed",
+                     f"{power_kW:.1f} kW ({power_frac*100:.0f}% rated), {rpm:.0f} rpm ({rpm_dev*100:.1f}% off target)",
+                     ">=60% rated, N within 5% of 3580", g3))
+
+    print("\nRe-running sigma_generator against the fixed MVEM...")
+    import importlib
+    sig_mod = importlib.import_module("parity.sigma_generator")
+    importlib.reload(sig_mod)
+    raw = sig_mod.collect_raw_rho(cfg)
+    sigma = sig_mod.compute_sigma(raw)
+    sigma1, sigma5 = sigma[0], sigma[4]
+
+    g4 = (sigma1 > 1e-3 * 100) and (sigma5 > 1e-3 * 100)
+    results.append(("4", "sigma(rho1), sigma(rho5) off floor",
+                     f"sigma1={sigma1:.5f}, sigma5={sigma5:.5f}",
+                     ">= 2 orders of magnitude above 1e-3", g4))
+
+    print("Perturbing f_fric_scale to check rho10 responds...")
+    nominal = {'cd_inj': [1.0]*cfg['geometry']['cylinders'], 'eta_v_scale': 1.0,
+               'eta_c_scale': 1.0, 'hA_scale': 1.0, 'f_fric_scale': 1.0}
+    faulty = dict(nominal); faulty['f_fric_scale'] = 1.6
+    p_h, atm_h = MVEM(cfg), isa(ALT_FT)
+    p_f = MVEM(cfg)
+    for _ in range(120):
+        p_h.step(1.0, nominal, atm_h, THROTTLE)
+        p_f.step(1.0, faulty, atm_h, THROTTLE)
+    oil_h, oil_f = p_h.get_outputs()['oil_press_bar'], p_f.get_outputs()['oil_press_bar']
+    g5 = abs(oil_h - oil_f) > 1e-6
+    results.append(("5", "rho10 responds to f_fric_scale",
+                     f"healthy oil_press={oil_h:.4f}, faulted={oil_f:.4f}, delta={abs(oil_h-oil_f):.6f}",
+                     "must differ (currently impossible by construction — no oil model yet)",
+                     g5))
+
+    # Critical altitude is DEFINED at max continuous power — at a reduced
+    # cruise throttle the compressor genuinely does not need enough boost to
+    # run out of capacity until much higher up, which is physically correct
+    # behaviour, not a bug. Sweeping at 72% (verified directly) shows MAP
+    # essentially flat to 20,000 ft for exactly this reason. 100% throttle is
+    # the condition the engine's own published critical_altitude_ft is
+    # actually measured against.
+    print("Altitude sweep 0 -> 20000 ft at 100% throttle (critical altitude is a max-continuous-power spec)...")
+    sweep = []
+    for alt in range(0, 20001, 2000):
+        p, _ = run_to_steady_state(cfg, float(alt), 100.0, seconds=90)
+        sweep.append((alt, p.get_outputs()['map_hPa'] * 100.0 / 1e5))
+    crit_alt = cfg['ratings']['critical_altitude_ft']
+    below = [v for a, v in sweep if a <= crit_alt]
+    above = [v for a, v in sweep if a > crit_alt]
+    flat = (max(below) - min(below)) < 0.35 * (sum(below) / len(below)) if below else False
+    falls = (above and above[-1] < (sum(below) / len(below)) * 0.85) if below and above else False
+    g6 = bool(flat and falls)
+    sweep_str = "  ".join(f"{a/1000:.0f}k:{v:.2f}bar" for a, v in sweep)
+    results.append(("6", "Altitude sweep shape", sweep_str,
+                     f"flat to {crit_alt}ft then falls", g6))
+
+    print("\n" + "=" * 78)
+    print(f"{'Gate':<4} {'Check':<32} {'Measured':<45}")
+    print("=" * 78)
+    n_pass = 0
+    for num, name, measured, target, ok in results:
+        status = "PASS" if ok else "FAIL"
+        n_pass += int(ok)
+        print(f"[{status}] Gate {num}: {name}")
+        print(f"         measured: {measured}")
+        print(f"         target:   {target}")
+    print("=" * 78)
+    print(f"{n_pass}/6 gates passed.")
+    if n_pass < 6:
+        print("\nNOT all six gates passed. Per directive: do not proceed to ML retraining.")
+    return n_pass
+
+
+if __name__ == "__main__":
+    main()

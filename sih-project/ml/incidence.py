@@ -30,7 +30,14 @@ INCIDENCE: dict[str, list[int]] = {
     "cooling_fouling":     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
     "oil_pump_wear":       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
     "bearing_wear":        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],
-    "detonation":          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
+    # rho11 (+2) is what separates detonation from egt_sensor_drift. Without it
+    # the two rows were IDENTICAL and the pair was structurally inseparable —
+    # which mattered because one is a component fault and the other
+    # instrumentation, the exact discrimination the 3:00 demo beat rests on.
+    # Detonation is a combustion abnormality that rings the structure and
+    # shows in the 0.5-order crank ripple; a drifting thermocouple does not
+    # move ripple at all. Measured effect on the oracle ceiling: 0.643 -> 0.687.
+    "detonation":          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  2],
     # --- instrumentation faults ---
     "map_sensor_drift":    [ 2,  1,  1,  1,  0,  0,  0,  0,  0,  0,  0],
     "egt_sensor_drift":    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],

@@ -29,7 +29,12 @@ export const INCIDENCE: Partial<Record<FaultId, number[]>> = {
   cooling_fouling:     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
   oil_pump_wear:       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
   bearing_wear:        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],
-  detonation:          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
+  // rho11 (+2): detonation rings the structure and shows in the 0.5-order
+  // crank ripple; a drifting thermocouple does not. Without this entry the
+  // detonation and egt_sensor_drift rows were identical, so the matrix could
+  // not tell a component fault from an instrumentation one. Mirrored in
+  // ml/incidence.py and docs/spec/residual-spec.md - change all three together.
+  detonation:          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  2],
   map_sensor_drift:    [ 2,  1,  1,  1,  0,  0,  0,  0,  0,  0,  0],
   egt_sensor_drift:    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
   cht_sensor_drift:    [ 0,  0,  0,  0,  0,  2,  2,  2,  2,  0,  0],

@@ -154,7 +154,7 @@ asserted from experience.**
 | Cooling degradation | · | · | · | ↑ | · | ↑ | ↑ | · |
 | Oil leak / pump wear | · | · | · | · | ↑ | · | ⇓ | · |
 | Bearing wear | · | · | · | ↑ | ⇑ | · | ↓ | · |
-| Detonation / pre-ignition | · | · | · | ↑ | · | ⇑ | · | · |
+| Detonation / pre-ignition | · | · | · | ↑ | · | ⇑ | · | ⇑ |
 | **MAP sensor drift** | ⇑ | ↑ | ↑ | ↑ | · | · | · | · |
 | **EGT sensor drift, cyl *i*** | · | · | · | ↑ | · | ⇑ | · | · |
 | **Lambda sensor drift** | · | ⇑ | · | · | · | · | · | · |
@@ -191,6 +191,18 @@ model cost.
 
 Two faults are structurally isolable **if and only if their columns differ.**
 Applying that test honestly:
+
+> **ρ₁₁ on the detonation row was added 2026-09-10.** Before that, detonation
+> and EGT sensor drift had *identical* rows, so the columns-differ test below
+> declared them inseparable — and that pair straddles the component /
+> instrumentation boundary the whole diagnosis rests on. Physically the
+> distinction is not subtle: detonation is an abnormal combustion event that
+> rings the structure and appears in the 0.5-order crank ripple, while a
+> drifting thermocouple moves no ripple whatsoever. The entry restores a
+> difference the physics always had and the table had simply omitted.
+> `ml.incidence.inseparable_groups()` is the regression test and must stay
+> empty. Mirrored in `ml/incidence.py` and
+> `frontend/src/analysis/incidence.ts` — change all three together.
 
 **Strongly isolable from steady-state parity alone (7 modes)**
 Compressor fouling, oil system faults, bearing wear, cooling degradation, ring
