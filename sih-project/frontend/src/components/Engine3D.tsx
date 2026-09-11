@@ -17,7 +17,8 @@ import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { EffectComposer, Bloom, SMAA } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import { useMission, useCurrentTick } from '../state/missionStore';
+import { useMission, useCurrentTick, useEngineDisplay, coldBlend } from '../state/missionStore';
+import { damp, smoothstep } from '../state/interpolate';
 import { N_CYL } from '../types/telemetry';
 import {
   CylinderAssembly, CylinderTag, Crankcase, Crankshaft,
@@ -28,6 +29,10 @@ import { SCENE } from '../theme';
 /** Where the camera looks. Shared by OrbitControls and FitCamera so the two
  *  cannot disagree about what "centred" means. */
 const TARGET: [number, number, number] = [0.16, 0.28, 0];
+
+/** How fast fault colour floods a cylinder. ~1.4 gives a bloom around a
+ *  second — slow enough to read as an event, fast enough not to feel laggy. */
+const FAULT_BLOOM_LAMBDA = 1.4;
 
 /** The composed viewing angle. Used both as the Canvas's initial camera and as
  *  what "Reset view" restores, so the two cannot drift apart. Only the
@@ -207,15 +212,13 @@ function Scene() {
   const [hovered, setHovered] = useState<number | null>(null);
 
   const crank = useRef(0);
-  const [crankAngle, setCrankAngle] = useState(0);
   const { gl } = useThree();
 
-  const rpm = tick.slow.rpm;
-  useFrame((_, dt) => {
-    // Heavily scaled — 3580 rpm at real speed is an unreadable strobe.
-    crank.current += Math.min(dt, 0.05) * (rpm / 60) * 0.15 * Math.PI * 2;
-    setCrankAngle(crank.current);
-  });
+  // While starting, the engine is turning slowly and the metal is still cold,
+  // so the crank and the thermal ramp both come from the spool rather than the
+  // live frame.
+  const engineDisplay = useEngineDisplay();
+  const rpm = engineDisplay.rpm;
 
   useEffect(() => {
     gl.domElement.style.cursor = hovered !== null ? 'pointer' : 'grab';
@@ -223,7 +226,10 @@ function Scene() {
 
   const { diagnosis, anomaly } = tick.health;
 
+  // A stopped engine has no diagnosis to show, so nothing is flagged until the
+  // twin genuinely has frames to work from.
   const cylFault = Array.from({ length: N_CYL }, (_, i) => {
+    if (!engineDisplay.running) return 0;
     const hit = diagnosis.top.find((h) => h.cylinder === i && h.fault !== 'healthy');
     return hit ? hit.p : 0;
   });
@@ -231,6 +237,36 @@ function Scene() {
     const hit = diagnosis.top.find((h) => h.cylinder === i && h.fault !== 'healthy');
     return hit ? hit.fault.includes('sensor') : false;
   });
+
+  // Isolation arrives as a STEP: the classifier is silent, then names a
+  // cylinder at p=0.93 on one tick. Easing the probability lets the colour
+  // bloom into the cylinder over about a second instead of snapping, which is
+  // the difference between "a state changed" and "something is happening".
+  // Folded into the crank's existing once-per-frame state update so this costs
+  // no extra render pass.
+  const smooth = useRef<number[]>(Array.from({ length: N_CYL }, () => 0));
+  const [frame, setFrame] = useState(() => ({
+    crank: 0,
+    fault: Array.from({ length: N_CYL }, () => 0),
+  }));
+
+  useFrame((_, dt) => {
+    const d = Math.min(dt, 0.05);
+    // Heavily scaled — 3580 rpm at real speed is an unreadable strobe.
+    crank.current += d * (rpm / 60) * 0.15 * Math.PI * 2;
+    for (let i = 0; i < N_CYL; i++) {
+      smooth.current[i] = damp(smooth.current[i], cylFault[i], FAULT_BLOOM_LAMBDA, d);
+    }
+    setFrame({ crank: crank.current, fault: smooth.current.slice() });
+  });
+
+  const crankAngle = frame.crank;
+  const cylFaultSmooth = frame.fault;
+  // Blend the glow gate on the eased probability instead of switching it at a
+  // hard 0.3, so the emissive comes up with the colour rather than after it.
+  const cylAnomaly = cylFaultSmooth.map(
+    (p) => anomaly.score * (0.08 + 0.92 * smoothstep(0.2, 0.45, p))
+  );
 
   return (
     <>
@@ -245,11 +281,11 @@ function Scene() {
             key={i}
             index={i}
             count={N_CYL}
-            cht={tick.slow.cht_C[i]}
+            cht={coldBlend(tick.slow.cht_C[i], engineDisplay.chtScale)}
             egt={tick.slow.egt_C[i]}
             chtRampFrom={engine.chtRampFrom_C}
-            anomaly={cylFault[i] > 0.3 ? anomaly.score : anomaly.score * 0.08}
-            faultProb={cylFault[i]}
+            anomaly={cylAnomaly[i]}
+            faultProb={cylFaultSmooth[i]}
             isSensorFault={cylSensor[i]}
             selected={selected === i}
             hovered={hovered === i}
@@ -279,8 +315,8 @@ function Scene() {
             key={i}
             index={i}
             count={N_CYL}
-            cht={tick.slow.cht_C[i]}
-            faultProb={cylFault[i]}
+            cht={coldBlend(tick.slow.cht_C[i], engineDisplay.chtScale)}
+            faultProb={cylFaultSmooth[i]}
             isSensorFault={cylSensor[i]}
           />
         ))}

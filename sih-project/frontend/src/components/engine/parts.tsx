@@ -22,6 +22,7 @@ import {
   MAT, N_FINS, CYL_X, thermalRamp, faultColour, faultEmissiveIntensity, exhaustHeat,
 } from './materials';
 import { C } from '../../theme';
+import { smoothstep } from '../../state/interpolate';
 
 // ---------------------------------------------------------------------------
 // Small reusable hardware
@@ -205,13 +206,16 @@ export function CylinderAssembly({
           backdrop that threshold is delicate. The halo is plain geometry, so
           the faulted cylinder stays identifiable even if bloom has to be turned
           down further for a given projector. */}
-      {anomaly > 0.15 && (
+      {anomaly > 0.02 && (
         <mesh position={[0, -1.28, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[0.95, 48]} />
           <meshBasicMaterial
             color={glow}
             transparent
-            opacity={Math.min(0.42, anomaly * 0.5)}
+            // Fade in across the old hard 0.15 cut rather than popping the disc
+            // into existence at it. The mesh is still gated, just far enough
+            // below the ramp that it is fully transparent when it mounts.
+            opacity={Math.min(0.42, anomaly * 0.5) * smoothstep(0.04, 0.18, anomaly)}
             depthWrite={false}
           />
         </mesh>

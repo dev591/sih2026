@@ -378,6 +378,14 @@ body {
   border-radius: 2px; cursor: pointer; font-size: 11px;
 }
 .transport:hover { color: var(--text); border-color: var(--accent); }
+/* Ignition sits with the transport but is wider and lettered, so STOP is never
+   mistaken for pause at a glance from the back of a room. */
+.ignition {
+  width: auto; padding: 0 9px; font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.08em;
+}
+.ignition-go { color: var(--ok, #15803d); border-color: currentColor; }
+.ignition:disabled { opacity: 0.75; cursor: default; }
 .clock {
   font-family: var(--mono); font-size: 13px; color: var(--text);
   min-width: 46px;
@@ -786,6 +794,8 @@ body {
 }
 .verdict-alert  { border-top-color: var(--alert); }
 .verdict-sensor { border-top-color: var(--sensor); }
+/* Neither good news nor bad — the twin simply has nothing to report yet. */
+.verdict-idle   { border-top-color: var(--line-2); }
 
 .verdict-half { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .verdict-half-main { min-width: 300px; }
@@ -805,6 +815,12 @@ body {
   vertical-align: 2px;
 }
 .verdict-note { font-size: 10.5px; color: var(--text-dimr); }
+/* The refusal-to-guess line. Deliberately not toned as an alarm: it qualifies
+   the diagnosis above it rather than announcing a second fault. */
+.verdict-novelty {
+  font-size: 10.5px; margin-top: 3px; padding-left: 7px;
+  color: var(--text-dim); border-left: 2px solid var(--line-2);
+}
 
 /* ---- edge tabs ---- */
 .edge-tabs-left, .edge-tabs-right, .edge-tabs-bottom { position: absolute; z-index: 12; }

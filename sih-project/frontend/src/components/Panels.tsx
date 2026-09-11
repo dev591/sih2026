@@ -87,8 +87,11 @@ function Metric({
 // ---------------------------------------------------------------------------
 export function ResidualHeatmap() {
   const ticks = useMission((s) => s.ticks);
-  const index = useMission((s) => s.index);
-  const now = Math.round(index);
+  // Subscribe to the ROUNDED index, not the fractional one. This grid is ~990
+  // cells and only ever moves a whole column at a time, so selecting the whole
+  // number lets zustand bail out between seconds instead of reconciling the
+  // entire heatmap on every animation frame.
+  const now = useMission((s) => Math.round(s.index));
 
   const WINDOW = 90;
   const start = Math.max(0, now - WINDOW);
@@ -166,7 +169,7 @@ export function DiagnosisPanel() {
       <div className="diag-head">
         <div className={`diag-name tone-${flag}`}>
           {FAULT_LABELS[top.fault]}
-          {top.cylinder !== null && <span className="diag-cyl">cyl {top.cylinder + 1}</span>}
+          {top.cylinder != null && <span className="diag-cyl">cyl {top.cylinder + 1}</span>}
         </div>
         <div className="diag-conf">{(top.p * 100).toFixed(0)}%</div>
       </div>

@@ -19,6 +19,10 @@ export function Scrubber() {
   const togglePlay = useMission((s) => s.togglePlay);
   const setSpeed = useMission((s) => s.setSpeed);
   const restart = useMission((s) => s.restart);
+  const engineState = useMission((s) => s.engineState);
+  const startProgress = useMission((s) => s.startProgress);
+  const startEngine = useMission((s) => s.startEngine);
+  const stopEngine = useMission((s) => s.stopEngine);
   const jumpTo = useBeatJump();
 
   const raf = useRef<number>(0);
@@ -52,6 +56,24 @@ export function Scrubber() {
 
   return (
     <div className="scrubber">
+      {/* Ignition is separate from the replay transport: one is the engine,
+          the other is the tape. Keeping them adjacent but distinct stops
+          "paused" from ever being mistaken for "shut down". */}
+      {engineState === 'running' ? (
+        <button className="transport ignition" onClick={stopEngine} title="Shut the engine down">
+          STOP
+        </button>
+      ) : (
+        <button
+          className="transport ignition ignition-go"
+          onClick={startEngine}
+          disabled={engineState === 'starting'}
+          title="Start the engine"
+        >
+          {engineState === 'starting' ? `${Math.round(startProgress * 100)}%` : 'START'}
+        </button>
+      )}
+
       <button className="transport" onClick={togglePlay} title="Space">
         {playing ? '❚❚' : '▶'}
       </button>

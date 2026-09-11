@@ -37,6 +37,21 @@ WEIGHTS_DIR = Path(__file__).parent / "weights"
 RHO_FLOOR = 1.5    # 99th pct of ‖ρ‖ on healthy engine
 RHO_FULL  = 6.0    # "clearly anomalous" level
 
+# M3 classifies the fault TYPE only — its class list carries no cylinder. The
+# localisation is already in the residual vector: rho6..rho9 ARE the
+# per-cylinder thermal deviations (telemetry-schema / residual-spec), so the
+# cylinder carrying a single-cylinder fault is the one whose deviation
+# dominates. Below this floor the deviations are inside healthy noise and we
+# report no cylinder rather than naming one on a coin-flip.
+PER_CYLINDER_FAULTS = {
+    "injector_fouling",
+    "ignition_misfire",
+    "detonation",
+    "egt_sensor_drift",
+    "cht_sensor_drift",
+}
+CYL_LOCALISE_FLOOR_SIGMA = 1.0
+
 
 class InferencePipeline:
     """
@@ -177,9 +192,23 @@ class InferencePipeline:
             abs(top_diag[0]["p_combined"] - top_diag[1]["p_combined"]) < 0.15
         )
 
+        # Which cylinder is carrying the deviation. Engine-wide faults get an
+        # explicit null: the schema declares `cylinder` on every hypothesis, and
+        # a MISSING key reads as `undefined` on the GCS, which is not the same
+        # thing as "this fault has no cylinder".
+        cyl_dev = np.abs(rho_nn[5:9])
+        localised_cyl = (
+            int(np.argmax(cyl_dev))
+            if cyl_dev.size and float(cyl_dev.max()) >= CYL_LOCALISE_FLOOR_SIGMA
+            else None
+        )
+
         diagnosis_block = {
             "top": [
                 {"fault": d["fault"], "p": round(d["p_combined"], 3),
+                 "cylinder": (
+                     localised_cyl if d["fault"] in PER_CYLINDER_FAULTS else None
+                 ),
                  "source": d["source"]}
                 for d in top_diag
             ],

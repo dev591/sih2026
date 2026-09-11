@@ -52,8 +52,6 @@ const KINDS: KindDef[] = [
   { kind: 'unmodelled', label: 'Fault outside the library', family: 'unknown',  perCylinder: false, unit: 'σ/s', min: 0.2, max: 1.5, step: 0.1, def: 0.62 },
 ];
 
-const INJECT_AT = 20;   // seconds into the run
-const SEEK_TO = 70;     // land the operator well after onset, with signal built
 
 export function FaultConsole() {
   const applyConfig = useMission((s) => s.applyConfig);
@@ -76,9 +74,12 @@ export function FaultConsole() {
 
   const inject = () => {
     const cfg: FaultConfig = {
-      [kind]: { startT: INJECT_AT, cyl: def.perCylinder ? cyl : undefined, rate },
+      // startT is restamped to the frame on screen by applyConfig's `fromNow`,
+      // so the fault ramps in from here rather than the clock jumping into a
+      // fault that has already developed.
+      [kind]: { startT: 0, cyl: def.perCylinder ? cyl : undefined, rate },
     } as FaultConfig;
-    applyConfig(cfg, { seekTo: SEEK_TO, blind: blindMode });
+    applyConfig(cfg, { blind: blindMode, fromNow: true });
   };
 
   const isScript = config === SCRIPTED;

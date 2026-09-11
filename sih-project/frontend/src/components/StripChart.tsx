@@ -7,11 +7,12 @@
  * mistake in hackathon dashboards, and it shows up on stage, not in dev.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { C } from '../theme';
 import { useMission } from '../state/missionStore';
+import { lerp } from '../state/interpolate';
 import { Panel } from './Panels';
 import { N_CYL } from '../types/telemetry';
 
@@ -30,31 +31,70 @@ interface StripProps {
   height?: number;
 }
 
+/** Seconds of history on screen. */
+const WINDOW = 120;
+
 export function StripChart({
   title, subtitle, pick, pickPredicted, unit, height = 150,
 }: StripProps) {
   const holder = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
 
-  const ticks = useMission((s) => s.ticks);
-  const index = useMission((s) => s.index);
-  const now = Math.round(index);
+  // The accessors are inline arrows at the call sites, so they get a fresh
+  // identity on every render. Park them in refs so the draw loop always calls
+  // the current ones without having to be torn down and rebuilt.
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+  const predRef = useRef(pickPredicted);
+  predRef.current = pickPredicted;
+  const hasPred = !!pickPredicted;
 
-  const WINDOW = 120;
+  /** Fractional "now", in mission seconds. The x scale is pinned to it. */
+  const xNow = useRef(0);
 
-  const data = useMemo(() => {
-    const start = Math.max(0, now - WINDOW);
-    const slice = ticks.slice(start, now + 1);
-    const xs = slice.map((t) => t.slow.t);
-    const series: number[][] = [];
-    for (let c = 0; c < N_CYL; c++) series.push(slice.map((t) => pick(t)[c]));
-    if (pickPredicted) {
+  /**
+   * Build the visible window, with a fractional leading edge.
+   *
+   * The mission is 1 Hz but the clock is continuous, so the newest point sits
+   * between two ticks. Interpolating it — and panning the x scale to match —
+   * is what makes the trace sweep instead of hopping a sample per second.
+   */
+  const buildData = (): uPlot.AlignedData => {
+    const { ticks, index } = useMission.getState();
+    const last = ticks.length - 1;
+    const series: number[][] = Array.from({ length: N_CYL + (hasPred ? 1 : 0) }, () => []);
+    const xs: number[] = [];
+    if (last < 0) return [xs, ...series] as uPlot.AlignedData;
+
+    const at = Math.max(0, Math.min(index, last));
+    const i = Math.floor(at);
+    const u = at - i;
+
+    for (let k = Math.max(0, i - WINDOW); k <= i; k++) {
+      const t = ticks[k];
+      xs.push(t.slow.t);
+      const v = pickRef.current(t);
+      for (let c = 0; c < N_CYL; c++) series[c].push(v[c]);
       // One prediction trace is enough to make the point — the gap between
       // measurement and prediction is the entire product.
-      series.push(slice.map((t) => pickPredicted(t)[0]));
+      if (hasPred) series[N_CYL].push(predRef.current!(t)[0]);
     }
+
+    if (u > 0 && i < last) {
+      const a = ticks[i];
+      const b = ticks[i + 1];
+      xs.push(lerp(a.slow.t, b.slow.t, u));
+      const va = pickRef.current(a);
+      const vb = pickRef.current(b);
+      for (let c = 0; c < N_CYL; c++) series[c].push(lerp(va[c], vb[c], u));
+      if (hasPred) {
+        series[N_CYL].push(lerp(predRef.current!(a)[0], predRef.current!(b)[0], u));
+      }
+    }
+
+    xNow.current = xs[xs.length - 1] ?? 0;
     return [xs, ...series] as uPlot.AlignedData;
-  }, [ticks, now, pick, pickPredicted]);
+  };
 
   useEffect(() => {
     if (!holder.current) return;
@@ -84,7 +124,15 @@ export function StripChart({
       padding: [8, 10, 0, 0],
       legend: { show: false },
       cursor: { drag: { x: false, y: false } },
-      scales: { x: { time: false } },
+      scales: {
+        x: {
+          time: false,
+          // Pin the viewport to the fractional clock. Returning a range here
+          // (rather than calling setScale after setData) keeps uPlot's own
+          // rescale pass in charge, so y still auto-fits normally.
+          range: () => [xNow.current - WINDOW, xNow.current] as [number, number],
+        },
+      },
       axes: [
         {
           stroke: C.textDim,
@@ -108,7 +156,7 @@ export function StripChart({
       series,
     };
 
-    plot.current = new uPlot(opts, data, holder.current);
+    plot.current = new uPlot(opts, buildData(), holder.current);
 
     const ro = new ResizeObserver(() => {
       if (plot.current && holder.current) {
@@ -117,17 +165,23 @@ export function StripChart({
     });
     ro.observe(holder.current);
 
+    // Redraw from a frame loop reading the store imperatively, rather than
+    // re-rendering React on every clock change. That is the whole reason this
+    // file uses uPlot instead of Recharts — see the note at the top — and it
+    // means the component itself subscribes to nothing.
+    let raf = requestAnimationFrame(function draw() {
+      raf = requestAnimationFrame(draw);
+      plot.current?.setData(buildData());
+    });
+
     return () => {
+      cancelAnimationFrame(raf);
       ro.disconnect();
       plot.current?.destroy();
       plot.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height]);
-
-  useEffect(() => {
-    plot.current?.setData(data);
-  }, [data]);
+  }, [height, hasPred]);
 
   return (
     <Panel title={title} subtitle={subtitle ?? unit}>
