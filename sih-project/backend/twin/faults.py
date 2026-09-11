@@ -45,6 +45,9 @@ _CLAMPS: dict[str, tuple[float, float]] = {
     "turbo":    (0.55, 1.0),   # eta_c_scale lower bound
     "cooling":  (0.5,  1.0),   # hA_scale lower bound
     "bearing":  (1.0,  2.2),   # f_fric_scale upper bound
+    "ringWear": (0.6,  1.0),
+    "oilLeak":  (0.2,  1.0),
+    "fuelFilter": (0.3, 1.0),
 }
 
 
@@ -54,6 +57,7 @@ def apply_fault_config(
     nominal_params: dict,
     sensor_biases: dict,
     isa_offset_K: float,
+    altitude_ft: float = 0.0,
 ) -> tuple[dict, dict, float]:
     """
     Apply the current fault_config at mission time t.
@@ -65,6 +69,7 @@ def apply_fault_config(
     nominal_params  : healthy MVEM parameter dict (never mutated in-place)
     sensor_biases   : healthy sensor bias dict (never mutated in-place)
     isa_offset_K    : current ISA temperature offset [K]
+    altitude_ft     : current altitude in feet
 
     Returns
     -------
@@ -118,6 +123,35 @@ def apply_fault_config(
             biases["egt_C"][cyl] = biases["egt_C"].get(cyl, 0.0) + sev \
                 if isinstance(biases["egt_C"], dict) \
                 else biases["egt_C"][cyl] + sev
+
+        elif fault_name == "ringWear":
+            lo, _ = _CLAMPS["ringWear"]
+            params["eta_v_scale"] = max(lo, 1.0 - sev)
+
+        elif fault_name == "oilLeak":
+            lo, _ = _CLAMPS["oilLeak"]
+            params["oil_pump_scale"] = max(lo, 1.0 - sev)
+
+        elif fault_name == "fuelFilter":
+            lo, _ = _CLAMPS["fuelFilter"]
+            alt_factor = 1.0 + max(0.0, (altitude_ft - 8000.0) / 20000.0)
+            params["fuel_rail_scale"] = max(lo, 1.0 - sev * alt_factor)
+
+        elif fault_name == "misfire":
+            if "misfire_prob" not in params:
+                params["misfire_prob"] = [0.0] * len(params.get("cd_inj", [1.0] * 4))
+            params["misfire_prob"][cyl] = min(1.0, sev)
+
+        elif fault_name == "detonation":
+            if "knock_severity" not in params:
+                params["knock_severity"] = [0.0] * len(params.get("cd_inj", [1.0] * 4))
+            params["knock_severity"][cyl] = min(1.0, sev)
+
+        elif fault_name == "mapSensor":
+            biases["map_hPa"] = biases.get("map_hPa", 0.0) + sev
+
+        elif fault_name == "lambdaSensor":
+            biases["lambda"] = biases.get("lambda", 0.0) + sev
 
         # "unmodelled" is BE-2's novelty channel — no MVEM mutation needed
 

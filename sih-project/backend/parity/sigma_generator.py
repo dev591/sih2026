@@ -39,6 +39,8 @@ from twin.atmosphere import isa
 from twin.measurement import MeasurementModel
 from twin.mvem import MVEM
 from twin.profiles import load_engine_profile
+from twin.faults import apply_fault_config, fresh_sensor_biases
+from twin.damage import DamageIntegrator
 
 # ---------------------------------------------------------------------------
 # Operating envelope
@@ -219,6 +221,105 @@ def write_healthy_dataset(cfg: dict, out_dir: Path) -> None:
         print(f"pandas unavailable — wrote CSV: {out_path}  ({len(rows)} rows)")
 
 
+def write_fault_runs(cfg: dict, out_dir: Path) -> None:
+    """
+    Write one labelled run per fault, with D and RUL_h attached to every row.
+    """
+    fault_names = ["injector", "turbo", "cooling", "bearing", "ringWear", "oilLeak", "misfire", "detonation", "fuelFilter", "chtSensor", "egtSensor", "mapSensor", "lambdaSensor"]
+    
+    nominal_params_base = {
+        "cd_inj":      [1.0] * cfg["geometry"]["cylinders"],
+        "eta_v_scale": 1.0,
+        "eta_c_scale": 1.0,
+        "hA_scale":    1.0,
+        "f_fric_scale": 1.0,
+    }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    altitude_ft = 5000.0
+    throttle_pct = 72.0
+    atm = isa(altitude_ft, isa_offset_K=0.0)
+
+    for fault_name in fault_names:
+        rows: list[dict] = []
+        plant = MVEM(cfg)
+        twin = MVEM(cfg)
+        damage = DamageIntegrator()
+        mp = MeasurementModel(seed=42)
+        mt = MeasurementModel(seed=999)
+
+        fault_config = {
+            fault_name: {"startT": 0.0, "cyl": 0, "rate": 0.02}
+        }
+        
+        for _ in range(STEPS_TO_STEADY_STATE):
+            plant.step(DT, nominal_params_base, atm, throttle_pct)
+            twin.step(DT, nominal_params_base, atm, throttle_pct)
+            
+        t = 0.0
+        max_steps = 6000
+        for step_i in range(max_steps):
+            plant_params, sensor_biases, _ = apply_fault_config(
+                t, fault_config, nominal_params_base, fresh_sensor_biases(cfg["geometry"]["cylinders"]), 0.0, altitude_ft
+            )
+            
+            plant.step(DT, plant_params, atm, throttle_pct)
+            T_fric = 6.2 * plant_params.get("f_fric_scale", 1.0) * plant.w / 100.0
+            damage.step(DT, T_fric, plant.w, plant.T_cht)
+            
+            twin.step(DT, nominal_params_base, atm, throttle_pct)
+            
+            measured = mp.measure(plant.get_outputs(), sensor_biases=sensor_biases, add_noise=True)
+            predicted = mt.measure(twin.get_outputs(), add_noise=False)
+            rho = compute_residuals(measured, predicted, cfg, sigma_vec=None)
+            
+            row: dict = {
+                "t": t,
+                "altitude_ft": altitude_ft,
+                "throttle_pct": throttle_pct,
+                "D": damage.D,
+                "RUL_h": damage.rul_h,
+            }
+            for i, r in enumerate(rho):
+                row[f"rho{i + 1}"] = float(r) if r is not None else float("nan")
+                
+            row.update({
+                "rpm":            measured["rpm"],
+                "map_hPa":        measured["map_hPa"],
+                "iat_K":          measured["iat_K"],
+                "fuel_flow_kgps": measured["fuel_flow_kgps"],
+                "brake_power_kW": measured["brake_power_kW"],
+                "turbo_rpm":      measured["turbo_rpm"],
+                "cht_C_mean":     float(np.mean(measured["cht_C"])),
+                "egt_C_mean":     float(np.mean(measured["egt_C"])),
+                "lambda_val":     float(measured.get("lambda_val", float("nan"))),
+            })
+            rows.append(row)
+            
+            t += DT
+            if damage.D >= 1.0:
+                break
+                
+        try:
+            import pandas as pd
+            df = pd.DataFrame(rows)
+            try:
+                out_path = out_dir / f"{fault_name}_run.parquet"
+                df.to_parquet(out_path, index=False)
+                print(f"Wrote {out_path} ({len(df)} rows)")
+            except Exception:
+                out_path = out_dir / f"{fault_name}_run.csv"
+                df.to_csv(out_path, index=False)
+                print(f"pyarrow unavailable - wrote CSV: {out_path}")
+        except ImportError:
+            import csv as _csv
+            out_path = out_dir / f"{fault_name}_run.csv"
+            with open(out_path, "w", newline="", encoding="utf-8") as fh:
+                writer = _csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"pandas unavailable - wrote CSV: {out_path}")
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -269,6 +370,12 @@ def main() -> None:
             / "data" / "healthy_flights"
         )
         write_healthy_dataset(cfg, data_dir)
+        
+        faults_dir = (
+            Path(__file__).resolve().parent.parent.parent
+            / "data" / "fault_runs"
+        )
+        write_fault_runs(cfg, faults_dir)
 
 
 if __name__ == "__main__":

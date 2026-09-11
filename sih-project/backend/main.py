@@ -29,6 +29,7 @@ from twin.faults import apply_fault_config, fresh_sensor_biases
 from twin.measurement import MeasurementModel
 from twin.mvem import MVEM
 from twin.profiles import load_engine_profile
+from twin.damage import DamageIntegrator
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -250,6 +251,8 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
     plantA = MVEM(cfg)
     twinA  = MVEM(cfg)
     plantB = MVEM(cfg)
+    
+    damageA = DamageIntegrator()
 
     measureA    = MeasurementModel(seed=42)
     measureB    = MeasurementModel(seed=100)
@@ -307,6 +310,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     nominal_params,
                     fresh_sensor_biases(N_CYL),
                     conn["isa_offset_K"],
+                    altitude_ft=altitude_ft,
                 )
                 conn["isa_offset_K"] = isa_k
 
@@ -315,6 +319,10 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
 
                 # ── Physics ───────────────────────────────────────────────
                 plantA.step(1.0, plantA_params, atm, throttle_pct)
+                
+                T_fric = 6.2 * plantA_params.get("f_fric_scale", 1.0) * plantA.w / 100.0
+                damageA.step(1.0, T_fric, plantA.w, plantA.T_cht)
+                
                 twinA.step( 1.0, nominal_params, atm, throttle_pct)
                 plantB.step(1.0, nominal_params, atm, throttle_pct)
 
@@ -433,7 +441,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "order_0p5_phase_deg": 143.7,
                     "order_1p0_mag":       0.118,
                     "order_2p0_mag":       0.077,
-                    "knock_intensity":     [0.02] * N_CYL,
+                    "knock_intensity":     out_plantA.get("knock_intensity", [0.02] * N_CYL),
                     "vib_band_rms": {
                         "lo_0_500":   0.31,
                         "mid_500_5k": 0.44,
@@ -515,12 +523,12 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     # Returns the RUL key the frontend uses to show the panel.
                     "rul": {
                         "component":     _rul_component(conn["fault_config"]),
-                        "physics_h":     50.0,
+                        "physics_h":     damageA.rul_h,
                         "network_h":     50.0,
                         "p10_h":         45.0,
                         "p50_h":         50.0,
                         "p90_h":         55.0,
-                        "reported_h":    50.0,
+                        "reported_h":    damageA.rul_h,
                         "heads_disagree": False,
                     },
 
@@ -574,8 +582,8 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                             # dD/dt is BE-1's damage integrator (Day 3). Until it
                             # exists the physics RUL head reports null rather than
                             # a fabricated number — see ml/m3_rul/model.py.
-                            damage_state=0.0,
-                            damage_rate_per_hr=0.0,
+                            damage_state=damageA.D,
+                            damage_rate_per_hr=damageA.dD_dt * 3600.0,
                         )
                         health.update(inferred)
                         # diagnosis.probe is part of the schema but is the active
