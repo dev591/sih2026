@@ -183,10 +183,40 @@ export const SCRIPTED: FaultConfig = {
   warmAirMass: true,
 };
 
+/**
+ * A commanded change of cruise altitude, ramped from the moment it was asked
+ * for — the same shape as a fault spec, and for the same reason: the operator
+ * watches the transition instead of being cut to the far side of it.
+ */
+export interface AltitudePlan {
+  startT: number;
+  from_ft: number;
+  to_ft: number;
+}
+
+/**
+ * Seconds for a commanded altitude change to complete.
+ *
+ * SIMULATION PACING, not a climb-rate claim — a real airframe in this class
+ * would take minutes, and nothing here is derived from its performance. It is
+ * set so the transition is watchable inside a demo slot.
+ */
+export const ALT_RAMP_S = 20;
+
+/** Commanded altitude at t, smoothstepped so neither end of the ramp corners. */
+export function altitudeAt(
+  t: number, eng: EngineProfile, plan?: AltitudePlan | null
+): number {
+  if (!plan) return eng.cruiseAltitude_ft;
+  if (t <= plan.startT) return plan.from_ft;
+  const u = Math.min(1, (t - plan.startT) / ALT_RAMP_S);
+  return plan.from_ft + (plan.to_ft - plan.from_ft) * (u * u * (3 - 2 * u));
+}
+
 // Cruise operating point, derived from the active engine profile. Nothing
 // engine-specific may be hardcoded below this line.
-const cruiseOf = (e: EngineProfile) => ({
-  altitude_ft: e.cruiseAltitude_ft,
+const cruiseOf = (e: EngineProfile, t = 0, alt?: AltitudePlan | null) => ({
+  altitude_ft: altitudeAt(t, e, alt),
   rpm: e.cruiseRpm,
   throttle_pct: 72,
   tas_mps: e.cruiseTas_mps,
@@ -289,9 +319,10 @@ interface Physics {
 }
 
 function physicsAt(
-  t: number, s: TrueState, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+  t: number, s: TrueState, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180,
+  alt?: AltitudePlan | null
 ): Physics {
-  const CRUISE = cruiseOf(eng);
+  const CRUISE = cruiseOf(eng, t, alt);
   const { displacement_m3: V_D, Q_LHV, AFR_stoich: AFR_ST, etaV_nominal: ETA_V_NOM } = eng;
   const N_CYL_E = eng.cylinders;
   const atm = isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg));
@@ -385,11 +416,12 @@ function physicsAt(
 // subtraction belongs to A.
 // ---------------------------------------------------------------------------
 function makeEngineB(
-  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180,
+  alt?: AltitudePlan | null
 ): SlowFrame {
-  const CRUISE = cruiseOf(eng);
+  const CRUISE = cruiseOf(eng, t, alt);
   const healthy = trueStateAt(0, cfg);
-  const phys = physicsAt(t, healthy, cfg, eng);
+  const phys = physicsAt(t, healthy, cfg, eng, alt);
   return {
     schema: 'pramana.slow.v1',
     t,
@@ -426,19 +458,22 @@ function makeEngineB(
 // Generate one tick
 // ---------------------------------------------------------------------------
 function makeTick(
-  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180
+  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180,
+  alt?: AltitudePlan | null
 ): MissionTick {
-  const CRUISE = cruiseOf(eng);
+  const CRUISE = cruiseOf(eng, t, alt);
   const AFR_ST = eng.AFR_stoich;
   const N_CYL_E = eng.cylinders;
   const trueS = trueStateAt(t, cfg);
   const bias = sensorBiasAt(t, cfg);
-  const phys = physicsAt(t, trueS, cfg, eng);
+  const phys = physicsAt(t, trueS, cfg, eng, alt);
 
-  // The TWIN's prediction assumes a HEALTHY engine — nominal parameters.
-  // The gap between this and the measurement is the entire product.
+  // The TWIN's prediction assumes a HEALTHY engine — nominal parameters. It
+  // gets the SAME commanded altitude, which is the whole point: the operating
+  // point is shared, so it cancels in the residual and only the health
+  // difference survives.
   const nominal = trueStateAt(0, cfg);
-  const predicted = physicsAt(t, nominal, cfg, eng);
+  const predicted = physicsAt(t, nominal, cfg, eng, alt);
 
   // ---- measured values = physics + sensor bias + noise ----
   const egt_meas = phys.egt_C.map((v, i) => v + bias.egt_C[i] + noise(2.2));
@@ -820,7 +855,7 @@ function makeTick(
 
   return {
     slow,
-    slowB: makeEngineB(t, noise, cfg, eng),
+    slowB: makeEngineB(t, noise, cfg, eng, alt),
     fast,
     health,
     predicted: {
@@ -848,12 +883,13 @@ let cached: MissionTick[] | null = null;
  * separate "sandbox mode" whose behaviour could diverge from the real thing.
  */
 export function generateFrom(
-  cfg: FaultConfig, eng: EngineProfile = VRDE_180, seed = 0x5148
+  cfg: FaultConfig, eng: EngineProfile = VRDE_180, seed = 0x5148,
+  alt?: AltitudePlan | null
 ): MissionTick[] {
   const noise = makeNoise(seed);
   const ticks: MissionTick[] = [];
   for (let t = 0; t <= MISSION_DURATION_S; t += 1 / HEALTH_HZ) {
-    ticks.push(makeTick(t, noise, cfg, eng));
+    ticks.push(makeTick(t, noise, cfg, eng, alt));
   }
   return ticks;
 }

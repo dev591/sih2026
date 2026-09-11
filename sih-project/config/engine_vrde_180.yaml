@@ -181,6 +181,15 @@ mvem:
     fin_area_m2: 0.28                     # A_fin
     hA_scale_nominal: 1.0                 # (hA)_sc — UKF state; cooling degradation
     coolant_temp_K: 363.15
+    # provenance: calibrated. Lumped head-to-coolant heat transfer coefficient.
+    # It lived as a bare `h_air = 50.0` in mvem.py while every other term of the
+    # same equation was declared here, and at that value h*A_fin was 14 W/K
+    # against ~6.3 kW/cyl of head heat — an equilibrium of ~539 degC. The head
+    # is initialised at 140 degC so a short run looked correct and then drifted
+    # past the 205 degC limit in under a minute (tau = m*cp/hA = 3.4 min).
+    # Calibrated so healthy cruise settles at ~140 degC: hA = Q_gas/(T-T_cool)
+    # = 6282/(140-90) = 126 W/K, over A_fin = 0.28 m^2.
+    head_htc_W_per_m2K: 450.0
 
   injector:
     discharge_coeff_nominal: 1.0          # C_d,inj per cylinder — UKF state (x4)

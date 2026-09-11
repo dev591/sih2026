@@ -693,6 +693,7 @@ body {
 
 .fc-actions { display: flex; gap: 5px; margin-top: 11px; }
 .fc-actions .btn { margin-top: 0; }
+.alt-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .btn-primary { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
 .btn-primary:hover { background: color-mix(in srgb, var(--accent) 82%, white); border-color: color-mix(in srgb, var(--accent) 82%, white); }
 

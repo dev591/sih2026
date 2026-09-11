@@ -13,6 +13,7 @@ import {
   SCRIPTED,
   MISSION_DURATION_S,
   type FaultConfig,
+  type AltitudePlan,
 } from '../mock/missionGenerator';
 import { feed, type FeedSource } from '../net/feed';
 import { VRDE_180, engineById, type EngineProfile } from '../config/engines';
@@ -124,9 +125,14 @@ interface MissionState {
   /** Ignition state, and 0..1 progress through the start sequence. */
   engineState: EngineState;
   startProgress: number;
+  /** Commanded cruise altitude, ramping. null = the profile's own cruise. */
+  altCmd: AltitudePlan | null;
 
   startEngine: () => void;
   stopEngine: () => void;
+  /** Command a new cruise altitude. The twin follows it too, so the residuals
+   *  should stay flat while every raw channel moves. */
+  setAltitude: (ft: number) => void;
 
   tick: () => MissionTick;
   setIndex: (i: number) => void;
@@ -176,6 +182,7 @@ export const useMission = create<MissionState>((set, get) => ({
   reportOpen: false,
   engineState: INITIAL_ENGINE_STATE,
   startProgress: INITIAL_ENGINE_STATE === 'running' ? 1 : 0,
+  altCmd: null,
 
   startEngine: () => {
     // Live mode: restart the backend's run too, so the spool is followed by a
@@ -186,6 +193,29 @@ export const useMission = create<MissionState>((set, get) => ({
 
   stopEngine: () =>
     set({ engineState: 'off', startProgress: 0, playing: false, drawer: null }),
+
+  setAltitude: (ft) => {
+    const s = get();
+    const nowT = s.tick().slow.t;
+    const altCmd: AltitudePlan = {
+      startT: nowT,
+      from_ft: s.tick().slow.altitude_ft,
+      to_ft: ft,
+    };
+
+    if (s.source === 'live') {
+      // The backend owns its own altitude profile; tell it, and let the frames
+      // carry the result back rather than simulating the climb locally.
+      feed.send({ type: 'altitude', ft });
+      set({ altCmd });
+      return;
+    }
+
+    // Regenerating mid-climb is safe for the same reason fault injection is:
+    // the noise stream does not branch on altitude, so the past is reproduced
+    // exactly and only the future bends.
+    set({ altCmd, ticks: generateFrom(s.config, s.engine, undefined, altCmd) });
+  },
 
   tick: () => {
     const { ticks, index } = get();
@@ -277,7 +307,9 @@ export const useMission = create<MissionState>((set, get) => ({
       return;
     }
 
-    const ticks = generateFrom(config, s.engine);
+    // Carry the commanded altitude across: injecting a fault must not silently
+    // put the aircraft back at its book cruise altitude.
+    const ticks = generateFrom(config, s.engine, undefined, s.altCmd);
     set({
       ticks,
       config,
@@ -310,7 +342,7 @@ export const useMission = create<MissionState>((set, get) => ({
    *  is genuinely a configuration change and not a rebuild. */
   setEngine: (id) => {
     const engine = engineById(id);
-    const ticks = generateFrom(get().config, engine);
+    const ticks = generateFrom(get().config, engine, undefined, get().altCmd);
     set({ engine, ticks, index: 0, playing: true, selectedCylinder: null, explainOpen: false });
   },
 

@@ -81,8 +81,22 @@ _OIL_T_LIMIT = cfg["limits"]["oil_temp_C"]
 # Scenario profile
 # ---------------------------------------------------------------------------
 
-def _altitude_ft(t: float) -> float:
-    """Climb from 5 000 ft to 18 000 ft over 8 minutes, then cruise."""
+# Seconds for a commanded altitude change to complete. SIMULATION PACING, not a
+# climb-rate claim — nothing here is derived from the airframe's performance;
+# it is set so the transition is watchable inside a demo slot.
+ALT_RAMP_S = 20.0
+
+
+def _altitude_ft(t: float, conn: dict | None = None) -> float:
+    """
+    Commanded altitude if the GCS has asked for one, otherwise the scenario's
+    own profile: climb from 5 000 ft to 18 000 ft over 8 minutes, then cruise.
+    """
+    cmd = (conn or {}).get("alt_cmd")
+    if cmd:
+        u = min(1.0, max(0.0, (t - cmd["startT"]) / ALT_RAMP_S))
+        return cmd["from_ft"] + (cmd["to_ft"] - cmd["from_ft"]) * (u * u * (3.0 - 2.0 * u))
+
     lo, hi, climb_s = 5000.0, 18000.0, 480.0
     if t <= 0.0:   return lo
     if t >= climb_s: return hi
@@ -265,6 +279,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
         "fault_config":  {},
         "isa_offset_K":  0.0,
         "persist_count": 0,   # consecutive ticks above anomaly threshold
+        "alt_cmd":       None,  # GCS-commanded altitude ramp, if any
     }
 
     PERSIST_OF   = 5
@@ -280,10 +295,21 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     conn["fault_config"]  = msg.get("config", {})
                     conn["isa_offset_K"]  = 0.0
                     conn["persist_count"] = 0
+                elif msg.get("type") == "altitude":
+                    # Ramp from wherever the aircraft actually is, so a command
+                    # issued mid-climb continues from there rather than
+                    # snapping back to the scenario profile.
+                    now = time.time() - start_time
+                    conn["alt_cmd"] = {
+                        "startT": now,
+                        "from_ft": _altitude_ft(now, conn),
+                        "to_ft":   float(msg.get("ft", 18000.0)),
+                    }
                 elif msg.get("type") == "reset":
                     conn["fault_config"]  = {}
                     conn["isa_offset_K"]  = 0.0
                     conn["persist_count"] = 0
+                    conn["alt_cmd"]       = None
                     damage.reset()
         except (WebSocketDisconnect, RuntimeError):
             pass
@@ -293,7 +319,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
         try:
             while True:
                 t            = time.time() - start_time
-                altitude_ft  = _altitude_ft(t)
+                altitude_ft  = _altitude_ft(t, conn)
                 throttle_pct = _throttle_pct(t)
 
                 # Build nominal params and apply fault configuration
@@ -616,8 +642,22 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    # Either task finishing means the connection is over: a receive loop that
+    # ended means the client went away, and a send loop that ended means we can
+    # no longer talk to it. gather() waited for BOTH, so a client that vanished
+    # without a close frame (a browser reload, a killed tab) left the sender
+    # looping forever — each one still running inference once a second. A demo
+    # with a few page reloads behind it accumulated them until frames were
+    # arriving every eight seconds instead of every one.
+    receiver = asyncio.create_task(_receive())
+    sender   = asyncio.create_task(_send())
     try:
-        await asyncio.gather(_receive(), _send())
+        _, pending = await asyncio.wait(
+            {receiver, sender}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
     except Exception:
         pass
 

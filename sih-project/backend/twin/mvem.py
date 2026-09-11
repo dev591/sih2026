@@ -22,6 +22,7 @@ class MVEM:
         self.cp_cht = mvem_cfg['thermal']['head_cp_J_per_kgK']
         self.A_fin = mvem_cfg['thermal']['fin_area_m2']
         self.T_cool = mvem_cfg['thermal']['coolant_temp_K']
+        self.h_head = mvem_cfg['thermal']['head_htc_W_per_m2K']
 
         self.Q_LHV = self.cfg['fuel']['Q_LHV_J_per_kg']
         self.AFR_st = self.cfg['fuel']['AFR_stoich']
@@ -312,7 +313,7 @@ class MVEM:
 
             # 4. Cylinder Head Thermal
             Q_gas_i = 0.15 * self.fuel_delivered * self.Q_LHV * Q_gas_mult
-            h_air = 50.0 * hA_scale
+            h_air = self.h_head * hA_scale
             dT_cht_dt = (Q_gas_i - h_air * self.A_fin * (self.T_cht - self.T_cool)) / (self.m_cht * self.cp_cht)
 
             Q_ex_i = self.fuel_delivered * self.Q_LHV - T_ind_i * self.w - Q_gas_i

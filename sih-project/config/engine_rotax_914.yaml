@@ -144,6 +144,13 @@ mvem:
     hA_scale_nominal: 1.0
     coolant_temp_K: 363.15
     cooling: liquid_head_air_cylinder   # 914 is a hybrid-cooled engine
+    # provenance: inherited, NOT independently calibrated. Same lumped
+    # coefficient as the VRDE profile — this is a convection coefficient, so the
+    # two engines are differentiated by fin_area_m2 rather than by it. The
+    # backend only ever loads the VRDE profile today, so this value has never
+    # been exercised against a run: calibrate it before quoting Rotax head
+    # temperatures.
+    head_htc_W_per_m2K: 450.0
 
   injector:
     discharge_coeff_nominal: 1.0

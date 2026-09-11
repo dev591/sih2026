@@ -67,12 +67,15 @@ function riskColour(p: number): string {
 export function MissionMap() {
   const tick = useCurrentTick();
   const engine = useMission((s) => s.engine);
+  const setAltitude = useMission((s) => s.setAltitude);
   const { mission, rul, virtual } = tick.health;
   const baseAlt = tick.slow.altitude_ft;
 
   /** What the operator is proposing, not what the aircraft is doing. */
   const [proposedAlt, setProposedAlt] = useState<number | null>(null);
-  const alt = proposedAlt ?? baseAlt;
+  // Rounded for display: a live feed reports a continuously ramping altitude,
+  // and "9,337.294 ft" reads as a bug rather than as precision.
+  const alt = Math.round(proposedAlt ?? baseAlt);
   const dragged = proposedAlt !== null && Math.abs(proposedAlt - baseAlt) > 100;
 
   // ---- how altitude changes the numbers -----------------------------------
@@ -210,9 +213,20 @@ export function MissionMap() {
       </div>
 
       {dragged && (
-        <button className="btn" onClick={() => setProposedAlt(null)}>
-          Reset to actual ({baseAlt.toLocaleString()} ft)
-        </button>
+        <div className="alt-actions">
+          {/* The slider alone is a what-if. This is the one that actually flies
+              the aircraft there — and the twin is told the same thing, so the
+              raw channels move while the residuals should not. */}
+          <button
+            className="btn btn-primary"
+            onClick={() => { setAltitude(proposedAlt!); setProposedAlt(null); }}
+          >
+            {proposedAlt! > baseAlt ? 'Climb to' : 'Descend to'} {proposedAlt!.toLocaleString()} ft
+          </button>
+          <button className="btn" onClick={() => setProposedAlt(null)}>
+            Reset to actual ({Math.round(baseAlt).toLocaleString()} ft)
+          </button>
+        </div>
       )}
 
       <Note>
