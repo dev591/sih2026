@@ -139,6 +139,10 @@ class MVEM:
 
         # ---- Derived values for output ---------------------------------
         self.T_im = 288.15
+        # Sea-level ISA until the first step() supplies the real atmosphere, so
+        # get_outputs() is safe to call on a freshly constructed model.
+        self.p_amb = 101325.0
+        self.T_amb = 288.15
         self.m_a = 0.0
         self.m_c = 0.0
         self.fuel_cmd = 0.0
@@ -155,7 +159,8 @@ class MVEM:
     def w_tc(self) -> float:
         return float(np.sqrt(max(2.0 * self.E_tc, 0.0) / self.J_tc))
 
-    def _compressor_ellipse(self, w_tc: float, Pi_c: float, p01: float, T01: float):
+    def _compressor_ellipse(self, w_tc: float, Pi_c: float, p01: float, T01: float,
+                            phi_scale: float = 1.0):
         """
         Leufven & Eriksson Ellipse model — see twin/airpath.py, which now owns
         the equations.
@@ -167,7 +172,7 @@ class MVEM:
         than the engine. Hence one implementation, called from both.
         """
         return compressor_ellipse(self.cfg, float(w_tc), float(Pi_c),
-                                  float(p01), float(T01))
+                                  float(p01), float(T01), float(phi_scale))
 
     def step(self, dt: float, params: dict, atm: dict, throttle_pct: float):
         cd_inj = np.array(params.get('cd_inj', np.ones(self.N_cyl)))
@@ -182,6 +187,15 @@ class MVEM:
 
         p_atm = atm['p']
         T_atm = atm['T']
+
+        # Retained so get_outputs() can report them. These are environment, not
+        # engine state, but they ARE separately instrumented on a real
+        # installation (the Austro E4 log carries "Ambient Pressure", and OAT is
+        # standard), and parity Path 2 needs both: the compressor map is
+        # evaluated at INLET conditions, so it cannot be closed from
+        # manifold-side channels alone.
+        self.p_amb = float(p_atm)
+        self.T_amb = float(T_atm)
 
         sub_steps = 100
         h = dt / sub_steps
@@ -297,13 +311,34 @@ class MVEM:
 
             # 5. Turbocharger — compressor + turbine + shaft energy balance
             eta_c_scale_eff = eta_c_scale
+            # FLOW-CAPACITY LOSS, coupled to the efficiency loss.
+            #
+            # eta_c_scale alone was an incomplete model of compressor
+            # degradation. Fouling and erosion move the map DOWN and to the
+            # LEFT — efficiency and swallowing capacity fall together — but
+            # scaling efficiency alone leaves the flow map untouched, and the
+            # flow map is what parity Path 2 reads. Measured consequence: a 25%
+            # "compressor fault" shifted rho1 by 0.4 sigma, i.e. the fault was
+            # invisible to the residual whose entire job is to catch it, and
+            # the shift was the WRONG SIGN. The incidence matrix has always
+            # predicted rho1 = -2 (strong negative) for turbo degradation, so
+            # the signature table was right and the simulator was wrong.
+            #
+            # Coupled rather than made an independent parameter: fouling does
+            # both at once, and a free extra degree of freedom would need a
+            # matching state in the UKF's theta vector to be identifiable.
+            flow_ratio = self.cfg['mvem']['compressor'].get(
+                'flow_capacity_loss_ratio', 0.0)
+            phi_c_scale = 1.0 - flow_ratio * (1.0 - eta_c_scale)
+            phi_c_scale = float(np.clip(phi_c_scale, 0.3, 1.0))
             Pi_c = self.p_im / p_atm  # NO clamp to >=1 — §1.3: Pi_c<1 is a
                                        # legitimate restriction/choke state,
                                        # not an error condition.
 
             for _ in range(TURB_SUBSTEPS):
                 w_tc_now = self.w_tc
-                mdot_c_raw, eta_c_map = self._compressor_ellipse(w_tc_now, Pi_c, p_atm, T_atm)
+                mdot_c_raw, eta_c_map = self._compressor_ellipse(
+                    w_tc_now, Pi_c, p_atm, T_atm, phi_c_scale)
                 eta_c = float(np.clip(eta_c_map * eta_c_scale_eff, 0.1, 0.95))
                 self.eta_c_last = eta_c
                 self.m_c = mdot_c_raw
@@ -400,5 +435,8 @@ class MVEM:
             'oil_press_bar': float(self.oil_press_bar_val),
             'oil_temp_C': float(self.T_oil - 273.15),
             'ripple': float(self.ripple),
-            'rpm': float(self.w * 60 / (2 * np.pi))
+            'rpm': float(self.w * 60 / (2 * np.pi)),
+            # Compressor INLET conditions — parity Path 2's own sensors.
+            'p_amb_hPa': float(self.p_amb / 100.0),
+            'oat_K': float(self.T_amb),
         }

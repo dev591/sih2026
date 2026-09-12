@@ -425,6 +425,18 @@ class MeasurementModel:
             + float(self._offset.get("map_hPa", 0.0)) \
             + sensor_biases.get("map_hPa", 0.0) + self._n("map_hPa", add_noise)
 
+        # Compressor inlet conditions — Path 2's own transducers, genuinely
+        # separate from the MAP sensor. That separateness is what makes rho1 a
+        # parity relation rather than a restatement of Path 1.
+        pa_lo, pa_hi = _CH["p_amb_hPa"]["range"]
+        p_amb = quantise(phys["p_amb_hPa"], pa_lo, pa_hi)
+        p_amb = self._apply_lag("p_amb_hPa", p_amb, dt) \
+            + float(self._offset.get("p_amb_hPa", 0.0)) + self._n("p_amb_hPa", add_noise)
+
+        oat_C_true = phys["oat_K"] - 273.15
+        oat = self._apply_lag("oat_K", oat_C_true + 273.15, dt) \
+            + float(self._offset.get("oat_K", 0.0)) + self._n("oat_K", add_noise)
+
         op_lo, op_hi = _CH["oil_press_bar"]["range"]
         oil_p = quantise(phys["oil_press_bar"], op_lo, op_hi)
         oil_p = self._apply_lag("oil_press_bar", oil_p, dt) \
@@ -479,6 +491,8 @@ class MeasurementModel:
             "fuel_flow_kgps": float(ff),
             "lambda_val": (float(lam_out) if lam_out is not None else None),
             "turbo_rpm": float(turbo),
+            "p_amb_hPa": float(p_amb),
+            "oat_K": float(oat),
             "ripple": float(phys["ripple"] + self.noise(0.002) if add_noise else phys["ripple"]),
 
             # air_mass_flow and brake_power_kW are NOT directly-sensed channels:

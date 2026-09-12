@@ -170,6 +170,40 @@ channels:
       Manifold FILLING (20-150 ms) dominates the observed response and is
       already in mvem.py. tau_s here is the die only.
 
+  p_amb_hPa:
+    sensor: piezoresistive_absolute
+    provenance: published         # the real Austro E4 log carries "Ambient Pressure"
+    units: hPa
+    range: [150.0, 1100.0]        # 150 hPa ~ 44,000 ft, well past the 32,000 ft ceiling
+    accuracy_frac_fs: 0.01
+    offset_frac_fs: 0.003         # provenance: assumed — the fixed, uncalibratable part
+    noise_sigma: 0.35             # provenance: assumed
+    tau_s: 0.05                   # provenance: assumed — static port plumbing, not the die
+    averaging_window_n: 8
+    dominant_error: sensor_accuracy
+    notes: >
+      Parity Path 2 evaluates the compressor map at INLET conditions, so it
+      needs ambient pressure and OAT. Without them Path 2 can only be closed
+      from manifold-side channels, which is what made rho1 degenerate. This is
+      a genuinely separate transducer from the MAP sensor, which is the point —
+      it is what stops Path 2 being a restatement of Path 1.
+
+  oat_K:
+    sensor: platinum_rtd
+    provenance: assumed
+    units: K
+    range: [200.0, 330.0]
+    tolerance_degC: 1.0
+    noise_sigma: 0.15
+    tau_s: 8.0                    # provenance: assumed — probe in the free stream,
+                                  # slow because of its radiation shield
+    averaging_window_n: 16
+    dominant_error: tolerance
+    notes: >
+      Compressor inlet temperature for Path 2, and the reference for the
+      cross-engine common-mode argument. A shielded OAT probe is deliberately
+      slow; that lag is real and belongs here rather than in the plant.
+
   oil_press_bar:
     sensor: piezoresistive_with_snubber
     provenance: assumed

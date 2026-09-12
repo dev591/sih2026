@@ -92,7 +92,8 @@ def volumetric_efficiency(cfg: dict, map_hPa: float, rpm: float) -> float:
 
 
 def compressor_ellipse(cfg: dict, w_tc: float, Pi_c: float,
-                       p01: float, T01: float) -> tuple[float, float]:
+                       p01: float, T01: float,
+                       phi_scale: float = 1.0) -> tuple[float, float]:
     """
     Leufven & Eriksson Ellipse model — Control Engineering Practice 21 (2013)
     1871-1883, validated by the authors against 236 real compressor maps to
@@ -114,7 +115,14 @@ def compressor_ellipse(cfg: dict, w_tc: float, Pi_c: float,
     speed_ratio = max(n_corr, 1.0) / c["n_corr_design_rpm"]
 
     psi_max = c["psi_max_design"] * speed_ratio ** c["psi_speed_exponent"]
-    phi_max = c["phi_max_design"] * speed_ratio ** c["phi_speed_exponent"]
+    # phi_scale is FLOW-CAPACITY degradation. Real compressor fouling and
+    # erosion move the map down AND to the left: they cost isentropic
+    # efficiency and swallowing capacity together. Modelling efficiency alone
+    # leaves the fault invisible to Path 2, because the flow map does not
+    # depend on efficiency — see the note in mvem.py where the two are coupled.
+    # The ESTIMATOR always passes 1.0: it evaluates the nominal map, and the
+    # gap between nominal and degraded is what rho1 is for.
+    phi_max = c["phi_max_design"] * speed_ratio ** c["phi_speed_exponent"] * phi_scale
 
     # Pi_c < 1 is a legitimate restriction/choke state, not an error.
     pi_eff = max(Pi_c, 1e-3)

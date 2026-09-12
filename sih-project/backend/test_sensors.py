@@ -61,6 +61,9 @@ def _phys(egt=720.0, cht=140.0, iat_K=318.0, n_cyl=4, rpm=3580.0):
         "air_mass_flow": 0.089,
         "fuel_cmd_per_cyl": 1.0e-5,
         "brake_power_kW": 81.5,
+        # Compressor inlet conditions — parity Path 2's own sensors.
+        "p_amb_hPa": 506.0,      # ~18,000 ft
+        "oat_K": 252.0,
     }
 
 

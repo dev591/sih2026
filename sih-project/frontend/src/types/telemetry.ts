@@ -44,6 +44,11 @@ export interface SlowFrame {
   altitude_ft: number;
   tas_mps: number;
   oat_K: number;
+  /** Ambient (compressor inlet) pressure. Parity Path 2 needs this and OAT:
+   *  the compressor map is evaluated at INLET conditions, so it cannot be
+   *  closed from manifold-side channels alone. A genuinely separate
+   *  transducer from map_hPa, which is what keeps rho1 independent. */
+  p_amb_hPa: number;
 }
 
 // ---------------------------------------------------------------------------

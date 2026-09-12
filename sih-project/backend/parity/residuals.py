@@ -16,6 +16,8 @@ from amplifying noise into very large numbers under small deviations.
 
 import math
 
+from twin.airpath import path1_speed_density, path2_compressor_map
+
 
 def compute_residuals(
     measured: dict,
@@ -40,11 +42,33 @@ def compute_residuals(
     AFR_st = cfg["fuel"]["AFR_stoich"]
 
     # ── ρ₁ — speed-density vs compressor map ─────────────────────────────
-    # Both in kg/s from the MVEM state; ratio normalised to predicted flow.
-    # Healthy value: 0.  Turbo/compressor fault: departs.
-    m_sd   = measured["air_mass_flow"]
-    m_comp = predicted["air_mass_flow"]
-    p_m_a  = max(m_comp, 1e-6)
+    # A GENUINE parity relation: two independent estimates of one quantity,
+    # from two different sensor sets, both computed from the MEASURED stream.
+    #
+    #   Path 1  MAP, IAT, crank speed      -> induction-side flow
+    #   Path 2  turbo speed, MAP, p_amb, OAT -> compressor-side flow
+    #
+    # This used to be `measured["air_mass_flow"] - predicted["air_mass_flow"]`,
+    # i.e. the plant's flow minus the twin's — the SAME estimator on two models.
+    # With plant and twin on identical nominal params that is zero by
+    # construction, which is why rho1 was a dead channel in jitter_report.json.
+    # The design PDF (§5.1) specifies rho1 = m_aSD - m_aC and warns that "an
+    # evaluator familiar with parity-space methods will check"; this is that.
+    #
+    # Both paths use NOMINAL model constants, so a degradation shows up as
+    # disagreement instead of being absorbed.
+    m_sd   = path1_speed_density(
+        cfg, measured["map_hPa"], measured["iat_K"], measured["rpm"]
+    )
+    m_comp = path2_compressor_map(
+        cfg, measured["turbo_rpm"], measured["map_hPa"],
+        measured["p_amb_hPa"], measured["oat_K"],
+    )
+    # Normalise on the induction-side estimate: it is the better-conditioned of
+    # the two (the compressor estimate collapses toward zero past the ellipse,
+    # and dividing by it would blow the residual up at exactly the surge
+    # condition we most want to read).
+    p_m_a  = max(m_sd, 1e-6)
     rho1   = (m_sd - m_comp) / p_m_a          # dimensionless fraction
 
     # ── ρ₂ — speed-density vs fuel/λ path ────────────────────────────────

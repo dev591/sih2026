@@ -471,6 +471,7 @@ function makeEngineB(
     altitude_ft: CRUISE.altitude_ft,
     tas_mps: CRUISE.tas_mps,
     oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg)).T,
+    p_amb_hPa: isa(CRUISE.altitude_ft).p / 100,
   };
 }
 
@@ -526,6 +527,7 @@ function makeTick(
     altitude_ft: CRUISE.altitude_ft,
     tas_mps: CRUISE.tas_mps,
     oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg)).T,
+    p_amb_hPa: isa(CRUISE.altitude_ft).p / 100,
   };
 
   const fast: FastFeatures = {

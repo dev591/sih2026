@@ -459,12 +459,20 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "fuel_flow_kgps": measuredA["fuel_flow_kgps"],
                     "lambda":         measuredA["lambda_val"],
                     "turbo_rpm":      measuredA["turbo_rpm"],
+                    # DERIVED, not sensed. The plant lumps compressor delivery
+                    # into manifold pressure (mvem.py: Pi_c = p_im/p_atm, no
+                    # intercooler dp) and never tracks a separate outlet
+                    # temperature, so there is nothing here to measure. Kept
+                    # because the schema is frozen; do NOT treat as independent
+                    # compressor instrumentation. Parity Path 2 uses the real
+                    # inlet sensors below (p_amb_hPa, oat_K) instead.
                     "comp_out_p_hPa": measuredA["map_hPa"] * 1.05,
                     "comp_out_T_K":   measuredA["iat_K"],
                     "throttle_pct":   float(throttle_pct),
                     "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
-                    "oat_K":          atm["T"],
+                    "oat_K":          measuredA["oat_K"],
+                    "p_amb_hPa":      measuredA["p_amb_hPa"],
                     **UNMODELLED,
                 }
 
@@ -494,12 +502,20 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "fuel_flow_kgps": measuredB["fuel_flow_kgps"],
                     "lambda":         measuredB["lambda_val"],
                     "turbo_rpm":      measuredB["turbo_rpm"],
+                    # DERIVED, not sensed. The plant lumps compressor delivery
+                    # into manifold pressure (mvem.py: Pi_c = p_im/p_atm, no
+                    # intercooler dp) and never tracks a separate outlet
+                    # temperature, so there is nothing here to measure. Kept
+                    # because the schema is frozen; do NOT treat as independent
+                    # compressor instrumentation. Parity Path 2 uses the real
+                    # inlet sensors below (p_amb_hPa, oat_K) instead.
                     "comp_out_p_hPa": measuredB["map_hPa"] * 1.05,
                     "comp_out_T_K":   measuredB["iat_K"],
                     "throttle_pct":   float(throttle_pct),
                     "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
-                    "oat_K":          atm["T"],   # CrossEngine reads slowB.oat_K
+                    "oat_K":          measuredB["oat_K"],   # CrossEngine reads slowB.oat_K
+                    "p_amb_hPa":      measuredB["p_amb_hPa"],
                     **UNMODELLED,
                 }
 
