@@ -148,7 +148,7 @@ export function FlightReport() {
             <div className="doc-finding-main">
               <div className={`doc-fault ${healthy ? 'is-ok' : 'is-alert'}`}>
                 {healthy ? 'No fault detected' : FAULT_LABELS[top.fault]}
-                {!healthy && top.cylinder !== null && (
+                {!healthy && top.cylinder != null && (
                   <span className="doc-cyl"> — cylinder {top.cylinder + 1}</span>
                 )}
               </div>

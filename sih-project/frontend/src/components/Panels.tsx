@@ -204,7 +204,7 @@ export function DiagnosisPanel() {
             <span className="hyp-bar" style={{ width: `${h.p * 100}%` }} />
             <span className="hyp-name">
               {FAULT_LABELS[h.fault]}
-              {h.cylinder !== null && ` · cyl ${h.cylinder + 1}`}
+              {h.cylinder != null && ` · cyl ${h.cylinder + 1}`}
             </span>
             <span className="hyp-src">{h.source}</span>
             <span className="hyp-p">{(h.p * 100).toFixed(0)}%</span>

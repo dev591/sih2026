@@ -25,6 +25,13 @@ const MISSION = generateMission();
 /** How many live frames we retain for the scrubber and the heatmap window. */
 const LIVE_BUFFER = 900;
 
+/** Above this many seconds behind the live head, snap instead of catching up
+ *  visibly — this much lag means a real pause or scrub, not network jitter. */
+const LIVE_SNAP_THRESHOLD_S = 5;
+/** Cap on live catch-up playback speed, so closing ordinary jitter is a barely
+ *  perceptible speed-up rather than a visible fast-forward. */
+const LIVE_CATCHUP_SPEED_CAP = 3;
+
 /**
  * Sample the mission at a FRACTIONAL index, interpolating between neighbours.
  *
@@ -244,13 +251,19 @@ export const useMission = create<MissionState>((set, get) => ({
       // In live mode the socket sets the DESTINATION and this clock walks
       // toward it, so 1 Hz frames render as continuous motion instead of a
       // once-a-second jolt. It costs us up to one frame of latency — a jitter
-      // buffer, and the price of smoothness. Playback rate scales with how far
-      // behind we are, so the buffer self-levels at ~1 frame and a tab that was
-      // hidden catches up instead of drifting further behind forever.
+      // buffer, and the price of smoothness.
       if (s.source === 'live') {
         if (s.index >= head) return {};
         const lag = head - s.index;
-        return { index: Math.min(head, s.index + dt * Math.max(1, lag)) };
+        // A real pause or a scrub-back leaves a large gap — closing that
+        // smoothly would mean visibly fast-forwarding for several seconds,
+        // which reads as "it just jumped forward" on its own. Snap to just
+        // behind the head instead; only ordinary network jitter (a couple of
+        // frames) gets the smooth catch-up, capped so it is a barely
+        // perceptible speed-up rather than a jump.
+        if (lag > LIVE_SNAP_THRESHOLD_S) return { index: Math.max(0, head - 1) };
+        const speed = Math.min(LIVE_CATCHUP_SPEED_CAP, Math.max(1, lag));
+        return { index: Math.min(head, s.index + dt * speed) };
       }
 
       const next = s.index + dt * s.speed;
@@ -373,14 +386,18 @@ export const useMission = create<MissionState>((set, get) => ({
       // something — a live feed that yanks the timeline out from under a judge
       // mid-question is worse than one that waits. The smooth clock deliberately
       // trails the head by ~1 frame, so the tolerance has to clear that.
-      const following = s.index >= base.length - 4;
       return {
         ticks,
-        // Do NOT snap to the head: `advance` walks the clock there smoothly.
+        // Do NOT snap to the head: `advance` walks the clock there smoothly,
+        // and does NOT touch `playing` — that stays exactly what the play/pause
+        // button last set it to. This used to auto-pause once the operator
+        // fell 4 frames behind the live head, which is normal jitter, not a
+        // deliberate scrub-back — the result was the transport pausing itself
+        // with no click, and the eventual catch-up feeding into the OTHER bug
+        // in `advance` unbounded catch-up speed to produce a visible jump.
         // Once the ring buffer starts dropping frames off the front, every
         // index shifts with it or "now" would slide forward through the data.
         index: Math.max(0, s.index - dropped),
-        playing: following ? s.playing : false,
       };
     }),
 

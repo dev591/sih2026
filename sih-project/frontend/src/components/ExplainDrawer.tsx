@@ -63,7 +63,9 @@ export function ExplainDrawer() {
           <div className="drawer-title">Why this diagnosis</div>
           <div className={`drawer-fault tone-${isSensor ? 'sensor' : 'alert'}`}>
             {FAULT_LABELS[top.fault]}
-            {top.cylinder !== null && ` · cylinder ${top.cylinder + 1}`}
+            {/* Loose check: a producer that omits `cylinder` gives undefined,
+                and undefined !== null renders "cylinder NaN". */}
+            {top.cylinder != null && ` · cylinder ${top.cylinder + 1}`}
             <span className="drawer-conf">{(top.p * 100).toFixed(0)}%</span>
           </div>
         </div>
