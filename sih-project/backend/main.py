@@ -311,6 +311,12 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     conn["persist_count"] = 0
                     conn["alt_cmd"]       = None
                     damage.reset()
+                    # Without this, the physics goes back to healthy
+                    # immediately but the ML's rolling window and persistence
+                    # counter still remember the fault for ~window_len ticks —
+                    # measured ~30s of a stale diagnosis surviving "Restart".
+                    if ml is not None:
+                        ml.reset()
         except (WebSocketDisconnect, RuntimeError):
             pass
 

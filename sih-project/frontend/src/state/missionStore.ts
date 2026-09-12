@@ -275,7 +275,18 @@ export const useMission = create<MissionState>((set, get) => ({
   pause: () => set({ playing: false }),
   togglePlay: () => set((s) => ({ playing: !s.playing })),
   setSpeed: (speed) => set({ speed }),
-  restart: () => set({ index: 0, playing: true }),
+  restart: () => {
+    const s = get();
+    // In live mode, resetting the LOCAL index does nothing on its own: the
+    // backend keeps streaming whatever fault/altitude state was already
+    // active, and the live-catchup snap (advance, above) pulls the display
+    // straight back to the head one frame later — so "Restart" looked like it
+    // did nothing. Tell the backend to clear its state too, same as the
+    // FaultConsole's "Healthy" button, so the frame it snaps back to is
+    // actually a clean one.
+    if (s.source === 'live') feed.send({ type: 'reset' });
+    set({ index: 0, playing: true });
+  },
   selectCylinder: (i) => set({ selectedCylinder: i, explainOpen: i !== null }),
   setExplainOpen: (explainOpen) => set({ explainOpen }),
   seekTo: (t) => set({ index: Math.max(0, Math.min(t, MISSION_DURATION_S)) }),

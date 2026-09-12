@@ -101,6 +101,22 @@ class InferencePipeline:
         nd = _load_json(weights_dir / "novelty_report.json", {"threshold_99p5": 0.42})
         self.novelty_threshold = float(nd.get("threshold_99p5", 0.42))
 
+    def reset(self) -> None:
+        """
+        Clear rolling state so a cleared fault reads as healthy on the NEXT
+        tick, not ~window_len seconds later.
+
+        Without this, `{"type": "reset"}` cleared the fault in the physics
+        (twin/backend), but M2's window keeps the last `window_len` residual
+        samples and M3 classifies over that same window — both still full of
+        fault-contaminated residuals until enough clean ticks arrive to push
+        them out. Measured: ~30s for anomaly score and diagnosis to settle back
+        to healthy after a reset, on a 10-tick window. The demo's "Restart" /
+        "Healthy" controls need this to be immediate.
+        """
+        self._rho_buf = []
+        self.persistence.reset()
+
         # ── UKF ──────────────────────────────────────────────────────────
         self.ukf = HealthUKF()
 
