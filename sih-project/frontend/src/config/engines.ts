@@ -205,11 +205,11 @@ export const ROTAX_914: EngineProfile = {
     speedDensity: true,
     compressorMap: true,
     fuelLambda: true,
-    intakeRestriction: true,
+    intakeRestriction: false,
   },
   pathNote:
-    'Throttled, so the compressible-orifice path works. 4 available paths give 3 ' +
-    'independent air-path residuals; ρ₃ is live and the isolability table differs.',
+    'The engine is throttled, but this installation lacks throttle-area and upstream-airbox ' +
+    'sensors. The compressible-orifice path remains unavailable, so ρ₃ is null rather than fabricated.',
 
   cruiseAltitude_ft: 15000,
   cruiseTas_mps: 54.0,

@@ -157,13 +157,25 @@ mvem:
     hA_scale_nominal: 1.0
     coolant_temp_K: 363.15
     cooling: liquid_head_air_cylinder   # 914 is a hybrid-cooled engine
-    # provenance: inherited, NOT independently calibrated. Same lumped
-    # coefficient as the VRDE profile — this is a convection coefficient, so the
-    # two engines are differentiated by fin_area_m2 rather than by it. The
-    # backend only ever loads the VRDE profile today, so this value has never
-    # been exercised against a run: calibrate it before quoting Rotax head
-    # temperatures.
-    head_htc_W_per_m2K: 450.0
+    # provenance: calibrated to the published sea-level take-off rating while
+    # holding CHT below the EASA 135 C limit. This is a lumped head-to-coolant
+    # conductance, not a claimed Rotax hardware value.
+    head_htc_W_per_m2K: 1050.0
+
+  oil:
+    # provenance: calibrated. The prior profile omitted this whole block and
+    # therefore inherited generic defaults, driving oil to >600 C and pressure
+    # close to zero. These parameters retain the same physical oil model used
+    # by VRDE (gear-pump flow, viscosity and bearing clearance) and are sized
+    # to respect the published EASA pressure/temperature limits at take-off.
+    pump_eta_vol: 0.85
+    pump_displacement_m3_per_rev: 5.0e-6
+    dp_gain_bar_per_unit: 12800
+    visc_ref_temp_K: 369.45
+    visc_temp_exponent: 1.6
+    relief_valve_bar: 7.0
+    thermal_mass_kJ_per_K: 4.5
+    cooler_gain_W_per_K: 1330.0
 
   injector:
     discharge_coeff_nominal: 1.0
@@ -174,12 +186,13 @@ mvem:
 # PROPELLER
 # ---------------------------------------------------------------------------
 propeller:
-  # provenance: assumed — see the VRDE profile's comment for the Cp(J) form.
-  # Not gate-verified this session (P0's gates target the VRDE profile).
-  provenance: assumed
+  # provenance: calibrated. The Cp scale is fitted to the published 84.5 kW
+  # / 5800 rpm sea-level take-off point. This is a model dynamometer load,
+  # not a claim about a specific aircraft's propeller.
+  provenance: calibrated
   diameter_m: 1.75
   blades: 3
-  cp0: 0.075
+  cp0: 0.27
   j_max: 1.05
   assumed_tas_mps: 61.2
   gear_ratio: 2.4295             # NOTE: geared — n_prop = N_crank / 2.4295.
@@ -194,11 +207,32 @@ parity_paths:
   speed_density: true
   compressor_map: true
   fuel_lambda: true
-  intake_restriction: true       # AVAILABLE HERE — the 914 is throttled, so the
-                                 # compressible-orifice path works. This profile
-                                 # therefore yields 3 independent residuals to the
-                                 # VRDE's 2, and the isolability table differs.
-  independent_residuals: 3       # n-1, with n=4 available paths
+  # The physical engine is throttled, but this deployment has no throttle-plate
+  # angle/area or upstream-airbox-pressure channel. A compressible-orifice
+  # estimate therefore cannot be computed independently; declaring it true
+  # would make rho3 fabricated. Add those sensors before enabling this path.
+  intake_restriction: false
+  independent_residuals: 2       # n-1, with the 3 instrumented paths above
+
+# Fixed healthy-baseline correction, recorded at 10,000 ft / 72% throttle
+# after 120 s with the profile's nominal parameters and fixed per-probe
+# tolerances. This is installation calibration, not an adaptive estimate: it
+# removes a repeatable healthy offset but cannot follow a subsequent fault.
+parity_calibration:
+  provenance: calibrated
+  reference_condition: "10,000 ft ISA, 72% throttle, 120 s steady-state"
+  baseline_rho:
+    - -0.0060879194
+    - -0.0067183149
+    - null
+    - 0.1564619179
+    - -0.0050572634
+    - 0.2095171057
+    - -0.0246608686
+    - -0.3202600300
+    - 0.1354037929
+    - 0.0547427178
+    - 0.0
 
 # ---------------------------------------------------------------------------
 # ENVIRONMENT PRESETS

@@ -171,7 +171,7 @@ def main():
     g5 = abs(oil_h - oil_f) > 1e-6
     results.append(("5", "rho10 responds to f_fric_scale",
                      f"healthy oil_press={oil_h:.4f}, faulted={oil_f:.4f}, delta={abs(oil_h-oil_f):.6f}",
-                     "must differ (currently impossible by construction — no oil model yet)",
+                     "must differ: shared bearing-clearance oil model",
                      g5))
 
     # Critical altitude is DEFINED at max continuous power — at a reduced

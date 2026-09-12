@@ -321,16 +321,17 @@ Switching engines in the running dashboard re-derives, live:
 - the colour ramps in the 3D view (a Rotax redlines at 135 °C, the VRDE at 200 — a fixed anchor would make one of them permanently look hot)
 - **which parity paths exist, and therefore how many independent residuals there are**
 
-That last one is the interesting one. The VRDE is an unthrottled FADEC diesel:
-no metering restriction, so **Path 4 does not exist** and ρ₃ is reported as
-`null` — never fabricated. The Rotax is throttled, so Path 4 *is* available, ρ₃
-is live, and the isolability analysis legitimately differs.
+The VRDE is an unthrottled FADEC diesel, so **Path 4 does not exist** and ρ₃
+is reported as `null` — never fabricated. The Rotax itself is throttled, but
+this deployment lacks the independent throttle-area and upstream-airbox
+measurements needed for the compressible-orifice estimate. Path 4 therefore
+also remains unavailable until those sensors are installed.
 
 The header states it explicitly, and it changes when you switch:
 
 ```
 VRDE 180 hp Aero-Diesel · 3 parity paths → 2 independent air-path residuals
-Rotax 914 F/UL          · 4 parity paths → 3 independent air-path residuals
+Rotax 914 F/UL          · 3 instrumented parity paths → 2 independent air-path residuals
 ```
 
 ### 4.3 Every number carries its provenance

@@ -53,6 +53,46 @@ ratings:
   idle_rpm: 900                  # provenance: assumed
 
 # ---------------------------------------------------------------------------
+# PUBLISHED VALIDATION ANCHORS — deliberately separate from model parameters.
+#
+# These are observations from VRDE's public product page, not values inferred
+# from the model.  `backend/validate_vrde.py` evaluates them and reports the
+# discrepancy without silently changing an assumed sub-model to make a gate
+# pass.  DRDO does not publish a dynamometer curve or power at 17,664 ft, so
+# the high-altitude record is an operating-validation point only, not a made-up
+# power target.
+# Source (accessed 2026-09-12):
+# https://drdo.gov.in/drdo/en/offerings/products/180-hp-diesel-engine-uav
+# ---------------------------------------------------------------------------
+validation_anchors:
+  provenance: published
+  source: "DRDO — 180 Hp Diesel Engine for UAV"
+  power_hold:
+    target_hp: 180.0
+    altitude_ft: [0, 11000]
+    note: "DRDO: take-off power is constant up to 11,000 ft."
+  high_altitude_trial:
+    altitude_ft: 17664
+    note: "DRDO: tested and validated for high-altitude performance at Leh and Changla."
+    published_power_hp: null      # not published; do not infer one
+  comparable_engine_surrogate:
+    # This is NOT VRDE data.  It is a public, close-architecture benchmark for
+    # checking whether the model's altitude lapse and fuel economy are of the
+    # right order before VRDE dynamometer data becomes available.
+    provenance: published_comparable_engine
+    name: "TEI PD180ST"
+    source: "TEI — PD180ST Turbodiesel Aviation Engine"
+    architecture: "2.1 L inline-4, common-rail, single-stage turbo, FADEC"
+    max_power_hp: 182.0
+    max_continuous_power_hp: 172.0
+    bsfc_g_per_kWh_msl: 220.0
+    altitude_power_hp:
+      - {altitude_ft: 20000, power_hp: 170.0}
+      - {altitude_ft: 30000, power_hp: 115.0}
+      - {altitude_ft: 40000, power_hp: 75.0}
+    note: "Never present these as VRDE measurements."
+
+# ---------------------------------------------------------------------------
 # LIMITS — these are the redlines the twin is beating. Fixed-threshold systems
 # alarm here; PRAMANA alarms on residual departure well before.
 # ---------------------------------------------------------------------------

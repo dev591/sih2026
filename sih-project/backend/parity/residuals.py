@@ -5,8 +5,9 @@ PRAMANA — parity residual vector ρ ∈ ℝ¹¹.
 Nominal value is zero. Departures identify fault location.
 
 All eleven residuals are computed here. ρ₃ is returned as None when
-parity_paths.intake_restriction is False (VRDE is unthrottled — no Path 4
-sensor). Everything downstream handles None gracefully.
+parity_paths.intake_restriction is False (the VRDE is unthrottled; the current
+Rotax telemetry also lacks the separate restriction sensors). Everything
+downstream handles None gracefully.
 
 If sigma_vec is supplied, each non-None element is divided by its healthy
 σ to produce a dimensionless Z-score. The sigma floor of 0.05 prevents
@@ -182,6 +183,21 @@ def compute_residuals(
         float(rho10),
         float(rho11),
     ]
+
+    # A profile may carry a FIXED healthy baseline measured during its own
+    # commissioning run. This is required for a cross-engine installation:
+    # probe tolerances and a repeatable model-form closure offset otherwise
+    # appear as a permanent fault on day one. It is deliberately static — a
+    # drifting sensor or degrading engine changes the residual away from this
+    # value and remains observable. Profiles without a commissioned baseline
+    # (including VRDE) retain the raw residual unchanged.
+    baseline = cfg.get("parity_calibration", {}).get("baseline_rho")
+    if baseline is not None:
+        if len(baseline) != len(raw_rho):
+            raise ValueError("parity_calibration.baseline_rho must contain 11 elements")
+        for i, reference in enumerate(baseline):
+            if raw_rho[i] is not None and reference is not None:
+                raw_rho[i] = float(raw_rho[i] - float(reference))
 
     # ── Sigma normalisation ───────────────────────────────────────────────
     # Divides each element by its healthy σ to produce a Z-score.
