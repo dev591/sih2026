@@ -146,12 +146,22 @@ channels:
 # ---------------------------------------------------------------------------
 # PRESSURES — piezoresistive
 # ---------------------------------------------------------------------------
+# NOTE ON PRESSURE ACCURACY. `accuracy_frac_fs` is the TOTAL error band, which
+# combines zero-offset, span, linearity and temperature terms. Only the
+# zero-offset part is a fixed, uncalibratable per-unit error, so only that part
+# is drawn once and held as a probe offset; the rest is repeatable and largely
+# absorbed by calibration. `offset_frac_fs` below is that fraction.
+# provenance: assumed — datasheets quote a combined figure and rarely split it.
+# Treating the whole 1.5 %FS as fixed offset inflated sigma(rho10) by ~390 %,
+# which desensitised oil-circuit fault detection for no physical reason.
+
   map_hPa:
     sensor: piezoresistive_mems
     provenance: published         # range/accuracy class typical of automotive MAP
     units: hPa
     range: [200.0, 3000.0]
-    accuracy_frac_fs: 0.015       # +/-1.5 %FS over temperature
+    accuracy_frac_fs: 0.015      # +/-1.5 %FS over temperature, TOTAL band
+    offset_frac_fs: 0.004        # provenance: assumed — the fixed, uncalibratable part
     noise_sigma: 1.2              # provenance: assumed
     tau_s: 0.002                  # published: sub-ms to ~2 ms die response
     averaging_window_n: 4
@@ -166,6 +176,7 @@ channels:
     units: bar
     range: [0.0, 10.0]
     accuracy_frac_fs: 0.015
+    offset_frac_fs: 0.004        # provenance: assumed — the fixed, uncalibratable part
     noise_sigma: 0.015
     tau_s: 0.4                    # provenance: assumed — snubber orifice dominates, 0.1-1 s
     averaging_window_n: 8
@@ -181,6 +192,7 @@ channels:
     units: bar
     range: [0.0, 2000.0]
     accuracy_frac_fs: 0.015
+    offset_frac_fs: 0.004        # provenance: assumed — the fixed, uncalibratable part
     noise_sigma: 4.0              # provenance: assumed
     tau_s: 0.002                  # published: 2 ms
     averaging_window_n: 4

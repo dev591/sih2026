@@ -277,7 +277,13 @@ class MeasurementModel:
             for name, spec in _CH.items():
                 tol = spec.get("tolerance_degC")
                 if tol is None:
-                    frac = spec.get("accuracy_frac_fs")
+                    # For pressures, use the ZERO-OFFSET fraction, not the total
+                    # accuracy band. `accuracy_frac_fs` combines offset, span,
+                    # linearity and temperature terms, and only the offset part
+                    # is a fixed per-unit error the twin cannot calibrate out.
+                    # Using the whole band inflated sigma(rho10) ~390% and
+                    # desensitised oil-circuit detection for no physical reason.
+                    frac = spec.get("offset_frac_fs", spec.get("accuracy_frac_fs"))
                     if frac is None:
                         continue
                     rng_hi = spec.get("range", [0.0, 1.0])[1]
