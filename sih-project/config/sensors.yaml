@@ -1,0 +1,303 @@
+# PRAMANA — SENSOR / TRANSDUCER SPECIFICATION
+#
+# Why this file exists
+# -------------------
+# Until now the measurement layer was `true_value + bias + gauss(0, sigma)`:
+# memoryless, instantaneous, and identical for every channel. That is wrong in
+# a way that matters, because THE TYPE OF SENSOR CHANGES BOTH THE GOVERNING
+# EQUATION AND THE RESPONSE TIME. A thermocouple is a Seebeck-effect voltage
+# source needing cold-junction compensation and settling in seconds; an NTC is
+# a resistance in a divider; a variable-reluctance pickup produces nothing at
+# all below a cranking threshold and updates once per tooth, not continuously.
+# A single Gaussian cannot represent any of that.
+#
+# This file is the specification the measurement model reads. It is also the
+# artefact to hand a reviewer who asks "which sensors, and how fast?".
+#
+# PROVENANCE MARKERS — on every number
+#   published  — from a standard or manufacturer datasheet; citable
+#   derived    — computed from a published figure
+#   measured   — third-party measurement, not an official document
+#   assumed    — engineering estimate; MUST be labelled as such if quoted
+#
+# TOLERANCE IS NOT NOISE. A Class 1 thermocouple's +/-1.5 degC is overwhelmingly
+# a FIXED per-probe calibration offset, not a value redrawn every second. Each
+# channel therefore carries both `tolerance_*` (drawn ONCE per probe at init,
+# and held) and `noise_sigma` (redrawn per sample). This is why real engines
+# show a persistent cylinder-to-cylinder EGT/CHT spread, which a resampled
+# Gaussian cannot reproduce.
+#
+# WHERE THE TIME CONSTANT ALREADY LIVES. Several dominant lags are physical,
+# not instrumental, and are ALREADY in the MVEM: the head's thermal mass
+# (m_cht*cp_cht) dominates CHT, manifold filling dominates MAP, and the oil
+# bulk dominates oil temperature. Those must NOT be double-counted here —
+# `tau_s` below is the SENSOR's own lag only. EGT is the exception: it is
+# algebraic in the plant (mvem.py), so it needs a gas-path transport lag as
+# well as a probe lag.
+
+spec:
+  version: 1
+  applies_to: engine_vrde_180.yaml
+  notes: >
+    Channel set is development/flight-test instrumentation, not a production
+    FADEC bus — see the instrumentation-provenance table in
+    docs/spec/telemetry-schema.md. A production aero-diesel carries no
+    per-cylinder CHT and no lambda setpoint.
+
+# ---------------------------------------------------------------------------
+# ACQUISITION — shared by every channel
+# ---------------------------------------------------------------------------
+acquisition:
+  provenance: assumed        # 12-bit is typical of a modern ECU; not a VRDE fact
+  adc_bits: 12
+  adc_vref_V: 5.0
+  adc_lsb_V: 0.00122         # derived: 5.0 / 2^12
+  ecu_internal_hz: 100       # matches mvem.py's 100 substeps per 1 s frame
+  downlink_hz: 1             # the frame rate actually sent to the GCS
+  notes: >
+    The 1 Hz frame is a DECIMATION of the 100 Hz internal sampling, not a
+    1 Hz sample. Each channel declares its own averaging_window_n below, so a
+    logged channel is legitimately smoother than a gauge would be. Sampling
+    1 Hz directly would alias combustion and rail ripple onto the trend.
+
+# ---------------------------------------------------------------------------
+# TEMPERATURES — thermocouples
+# ---------------------------------------------------------------------------
+channels:
+
+  egt_C:
+    sensor: thermocouple_type_k
+    junction: grounded
+    mounting: exhaust_boss
+    standard: "IEC 60584-1 / NIST ITS-90"
+    provenance: published       # polynomial + tolerance class are standards
+    units: degC
+    range: [0.0, 1000.0]
+    tolerance_class: 1          # +/-1.5 degC or +/-0.004*|T|, whichever is greater
+    tolerance_degC: 1.5
+    tolerance_frac: 0.004
+    noise_sigma: 0.8            # provenance: assumed — per-sample electrical noise
+    tau_s: 2.0                  # provenance: assumed — closed-sheath probe, 1-4 s range
+    tau_gas_transport_s: 0.35   # provenance: assumed — port to probe location
+    cold_junction:
+      enabled: true
+      tau_s: 60.0               # provenance: assumed — terminal-block thermal mass, 30-120 s
+      notes: >
+        Compensation is E_hot = E_meas + E(T_cj), then invert the polynomial.
+        Adding TEMPERATURES instead of EMFs is wrong by several degC because
+        the Seebeck coefficient is not constant (~39.5 uV/degC near 0, 41.0 at
+        300, 38.9 at 1000). The terminal-block lag makes this a genuine slow
+        drift source after a cowl-temperature step, which is exactly the kind
+        of thing a drift-fault detector must not mistake for a sensor fault.
+    averaging_window_n: 8
+    dominant_error: tolerance_and_cjc   # at 12-bit, quantization is negligible
+
+  cht_C:
+    sensor: thermocouple_type_j
+    junction: grounded
+    mounting: thermowell_bayonet   # NOT gasket-washer: a diesel has no spark plug
+    standard: "IEC 60584-1 / NIST ITS-90"
+    provenance: published
+    units: degC
+    range: [0.0, 400.0]
+    tolerance_class: 1
+    tolerance_degC: 1.5
+    tolerance_frac: 0.004
+    noise_sigma: 0.4              # provenance: assumed
+    tau_s: 0.6                    # provenance: assumed — sensor only, 0.2-1 s
+    averaging_window_n: 16
+    dominant_error: tolerance
+    notes: >
+      The 15-60 s response a real CHT shows is the HEAD's thermal mass, which
+      mvem.py already integrates (m_cht*cp_cht). Do not add it here.
+
+  iat_K:
+    sensor: ntc_thermistor
+    provenance: assumed
+    units: K
+    range: [220.0, 400.0]
+    tolerance_degC: 1.5
+    noise_sigma: 0.25
+    tau_s: 1.5                    # provenance: assumed — small bead in a fast air stream
+    averaging_window_n: 8
+    dominant_error: tolerance
+
+  oil_temp_C:
+    sensor: ntc_thermistor
+    provenance: measured          # R-T curve is a third-party measurement, not official
+    reference: "VDO 323-057 / Rotax p/n 965531, fitted curve"
+    units: degC
+    range: [-40.0, 160.0]
+    tolerance_degC: 2.0
+    noise_sigma: 0.2
+    tau_s: 5.0                    # provenance: assumed — immersed probe, 2-10 s
+    averaging_window_n: 16
+    divider:
+      pullup_ohm: 1800.0          # provenance: assumed
+      notes: >
+        The divider is the real physics: resolution compresses at high
+        temperature as the NTC resistance falls. A pure Gaussian cannot
+        reproduce that asymmetry.
+    dominant_error: tolerance
+    notes: >
+      The oil SYSTEM's bulk time constant is minutes and belongs in the plant,
+      not here. tau_s is the probe alone.
+
+# ---------------------------------------------------------------------------
+# PRESSURES — piezoresistive
+# ---------------------------------------------------------------------------
+  map_hPa:
+    sensor: piezoresistive_mems
+    provenance: published         # range/accuracy class typical of automotive MAP
+    units: hPa
+    range: [200.0, 3000.0]
+    accuracy_frac_fs: 0.015       # +/-1.5 %FS over temperature
+    noise_sigma: 1.2              # provenance: assumed
+    tau_s: 0.002                  # published: sub-ms to ~2 ms die response
+    averaging_window_n: 4
+    dominant_error: sensor_accuracy
+    notes: >
+      Manifold FILLING (20-150 ms) dominates the observed response and is
+      already in mvem.py. tau_s here is the die only.
+
+  oil_press_bar:
+    sensor: piezoresistive_with_snubber
+    provenance: assumed
+    units: bar
+    range: [0.0, 10.0]
+    accuracy_frac_fs: 0.015
+    noise_sigma: 0.015
+    tau_s: 0.4                    # provenance: assumed — snubber orifice dominates, 0.1-1 s
+    averaging_window_n: 8
+    dominant_error: sensor_accuracy
+    notes: >
+      Snubbers are fitted specifically to kill needle flicker, so the
+      instrument is deliberately slower than the pressure it measures.
+
+  fuel_rail_bar:
+    sensor: piezoresistive_rail
+    reference: "Bosch RDS4.2 class"
+    provenance: published
+    units: bar
+    range: [0.0, 2000.0]
+    accuracy_frac_fs: 0.015
+    noise_sigma: 4.0              # provenance: assumed
+    tau_s: 0.002                  # published: 2 ms
+    averaging_window_n: 4
+    dominant_error: sensor_accuracy
+    modelled: false
+    notes: >
+      UNMODELLED today — emitted as a constant (see UNMODELLED in main.py).
+      On a real common-rail diesel this is the LOAD parameter, and making it so
+      is Phase 4. Rail pressure is a fast, per-injection-ripple signal, so a
+      2 ms sensor sees a smoothed envelope rather than the true peak.
+
+# ---------------------------------------------------------------------------
+# SPEEDS — discrete, not continuous
+# ---------------------------------------------------------------------------
+  rpm:
+    sensor: variable_reluctance
+    provenance: published         # the tooth arithmetic is exact
+    units: rpm
+    range: [0.0, 4500.0]
+    wheel:
+      teeth: 60
+      missing: 2                  # 60-2: 58 teeth + an 18 deg gap for once-per-rev sync
+      deg_per_tooth: 6.0
+      updates_per_rev: 58
+    timer_hz: 16000000
+    arming_threshold_V: 0.4       # provenance: assumed
+    noise_sigma: 1.0              # provenance: assumed — torsional ripple dominates in reality
+    tau_s: 0.0                    # no thermal lag; latency is one tooth period
+    averaging_window_n: 1
+    dominant_error: update_granularity
+    notes: >
+      Quantization is negligible (delta_rpm ~ rpm^2/f_timer = 0.36 rpm at
+      2400 rpm on a 16 MHz timer). What is NOT negligible: output amplitude
+      scales with shaft speed, so below the arming threshold there is NO
+      SIGNAL AT ALL. That is a real failure mode a Gaussian cannot express,
+      and it is why a VR pickup cannot be used for a stationary-engine reading.
+
+  turbo_rpm:
+    sensor: eddy_current_blade_passage
+    provenance: assumed
+    units: rpm
+    range: [0.0, 250000.0]
+    blades: 6
+    noise_sigma: 150.0
+    tau_s: 0.0
+    averaging_window_n: 4
+    dominant_error: update_granularity
+    notes: >
+      Test-cell / dyno instrument, not fitted to production light-aircraft
+      engines. Kept because parity Path 2 needs it. Update interval is
+      60/(blades*rpm) — 100 us at 100,000 rpm, so effectively continuous here.
+
+# ---------------------------------------------------------------------------
+# COMPOSITION AND FLOW
+# ---------------------------------------------------------------------------
+  lambda_val:
+    sensor: wideband_uego
+    reference: "Bosch LSU 4.9"
+    provenance: published         # the Ip-lambda table is from the datasheet
+    units: dimensionless
+    range: [0.65, 10.0]
+    accuracy_at_lambda1: 0.007    # published: 1.016 +/- 0.007
+    noise_sigma: 0.004            # provenance: assumed
+    tau_s: 0.1                    # published: ~100 ms gas response
+    heater:
+      light_off_s: 25.0           # provenance: assumed — datasheet gives a ramp, not a time
+      operating_temp_C: 780
+      invalid_until_lit: true
+    gain_rich: 8                  # published: why real LSU front-ends amplify
+    gain_lean: 17
+    averaging_window_n: 8
+    dominant_error: quantization_without_gain
+    notes: >
+      MUST read invalid (null) until the heater reaches its window — a cold
+      UEGO does not read lean, it reads NOTHING. The residual generator already
+      handles null channels (parity path 4), so reuse that path.
+      Ip-lambda is strongly non-linear beyond lambda~2, which is exactly where
+      a diesel lives, so linear interpolation there is a real error.
+      Without the gain stage a 12-bit LSB is ~0.01 lambda, because +/-2.25 mA
+      across 61.9 ohm is only +/-139 mV.
+
+  fuel_flow_kgps:
+    sensor: turbine_pulse
+    reference: "EI FT-60"
+    provenance: published
+    units: kg/s
+    range: [0.0, 0.02]
+    k_factor_pulses_per_usgal: 68000
+    linearity_frac: 0.01          # published: +/-1 %
+    noise_sigma: 1.5e-6           # provenance: assumed
+    tau_s: 0.3                    # provenance: assumed — rotor inertia, 0.2-0.5 s
+    gate_time_s: 1.0
+    low_flow_cutoff_usgph: 0.6    # published: K rises non-linearly below this
+    fuel_density_kg_per_l: 0.82   # published: Jet A-1 / diesel at 15 degC
+    density_temp_coeff_per_K: -0.00095
+    averaging_window_n: 1
+    dominant_error: gate_quantization
+    notes: >
+      A pulse counter measures VOLUME; this is a mass-flow twin, so the
+      density conversion matters. A 30 degC fuel-temperature swing is ~3 % mass
+      error, LARGER than the transducer's own 1 % spec. Do not use the avgas
+      0.72 kg/l figure — this engine burns Jet A-1.
+      Gate time trades resolution against latency: a 1 s gate at 8 USGPH gives
+      +/-0.66 % and 1 s of lag.
+
+# ---------------------------------------------------------------------------
+# FAILURE MODES — what a transducer actually does when it fails
+# ---------------------------------------------------------------------------
+# Today drift/offset is the ONLY modelled sensor failure, and it ramps
+# unbounded (plant faults are clamped in faults.py; sensor biases are not).
+# These are the modes real instrumentation exhibits.
+failure_modes:
+  provenance: assumed
+  drift:            { description: "slow calibration walk",        clamp_frac_fs: 0.25 }
+  stuck_at:         { description: "value freezes at last sample" }
+  open_circuit:     { description: "thermocouple burnout / broken wire; reads rail or null" }
+  short_to_ground:  { description: "reads bottom of range" }
+  dropout:          { description: "intermittent loss of samples", default_rate_hz: 0.05 }
+  noise_degradation: { description: "sigma inflates, mean stays correct", default_multiplier: 6.0 }
+  no_sync:          { description: "VR pickup below arming threshold — no reading at all" }
