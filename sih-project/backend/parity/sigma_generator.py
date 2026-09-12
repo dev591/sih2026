@@ -85,7 +85,7 @@ def collect_raw_rho(cfg: dict) -> np.ndarray:
         plant        = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
         twin         = MVEM(cfg, seed=999)
         measure_plant = MeasurementModel(seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
-        measure_twin  = MeasurementModel(seed=999)
+        measure_twin  = MeasurementModel(seed=999, is_twin=True)
 
         for _ in range(STEPS_TO_STEADY_STATE):
             plant.step(DT, nominal_params, atm, throttle_pct)
@@ -172,7 +172,7 @@ def write_healthy_dataset(cfg: dict, out_dir: Path) -> None:
         plant = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
         twin = MVEM(cfg, seed=999)
         mp = MeasurementModel(seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
-        mt = MeasurementModel(seed=999)
+        mt = MeasurementModel(seed=999, is_twin=True)
 
         for _ in range(STEPS_TO_STEADY_STATE):
             plant.step(DT, nominal_params, atm, throttle_pct)
@@ -283,7 +283,7 @@ def write_fault_dataset(cfg: dict, out_dir: Path) -> None:
         plant = MVEM(cfg, seed=42)
         twin  = MVEM(cfg, seed=43)
         mp = MeasurementModel(seed=42)
-        mt = MeasurementModel(seed=999)
+        mt = MeasurementModel(seed=999, is_twin=True)
         damage = DamageIntegrator()
 
         atm = isa(FAULT_ALTITUDE_FT, isa_offset_K=0.0)

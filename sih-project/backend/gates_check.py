@@ -87,7 +87,7 @@ def main():
     fault_params['eta_c_scale'] = 0.75  # 25% compressor fouling
     atm5k = isa(5000.0)
     plant_f, twin_f = MVEM(cfg), MVEM(cfg)
-    mp, mt = MeasurementModel(seed=1), MeasurementModel(seed=999)
+    mp, mt = MeasurementModel(seed=1), MeasurementModel(seed=999, is_twin=True)
     for _ in range(150):
         plant_f.step(1.0, fault_params, atm5k, 72.0)
         twin_f.step(1.0, nominal_test, atm5k, 72.0)

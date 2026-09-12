@@ -67,7 +67,6 @@ def _steady(cfg, altitude_ft=10000, throttle_pct=72.0, steps=30, params=None):
 
 def test_op_invariance_and_sum_to_zero(cfg):
     print("Test 1+2 — OP invariance and ρ₆–ρ₉ sum-to-zero...")
-    meas = MeasurementModel(seed=42)
     nom = {
         "cd_inj": [1.0] * cfg["geometry"]["cylinders"],
         "eta_v_scale": 1.0,
@@ -81,12 +80,19 @@ def test_op_invariance_and_sum_to_zero(cfg):
             atm = isa(alt)
             plant = MVEM(cfg)
             twin  = MVEM(cfg)
+            # Fresh instrumentation per operating point, and SEPARATE plant and
+            # twin instances. The measurement model is stateful now (per-channel
+            # lag), so one shared instance would let the plant and twin clobber
+            # each other's filters, and reusing it across points would carry
+            # stale lag from the previous altitude into the next.
+            meas_p = MeasurementModel(seed=42)
+            meas_t = MeasurementModel(seed=999, is_twin=True)
             for _ in range(30):
                 plant.step(1.0, nom, atm, throttle)
                 twin.step( 1.0, nom, atm, throttle)
 
-            measured  = meas.measure(plant.get_outputs(), add_noise=True)
-            predicted = meas.measure(twin.get_outputs(),  add_noise=False)
+            measured  = meas_p.measure(plant.get_outputs(), add_noise=True)
+            predicted = meas_t.measure(twin.get_outputs(),  add_noise=False)
             rho = compute_residuals(measured, predicted, cfg, sigma_vec=[1.0] * 11)
 
             rho6_9  = [r for r in rho[5:9] if r is not None]
@@ -241,7 +247,7 @@ def test_fault_isolation(cfg):
         twin_tb.step( 1.0, nom, atm, 72.0)
 
     # Healthy residuals
-    mp = MeasurementModel(seed=42); mt = MeasurementModel(seed=999)
+    mp = MeasurementModel(seed=42); mt = MeasurementModel(seed=999, is_twin=True)
     m_tb_h = mp.measure(plant_tb.get_outputs(), add_noise=False)
     p_tb_h = mt.measure(twin_tb.get_outputs(),  add_noise=False)
     rho_h  = compute_residuals(m_tb_h, p_tb_h, cfg, sigma_vec=None)

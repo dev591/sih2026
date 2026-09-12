@@ -300,7 +300,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
 
     measureA    = MeasurementModel(seed=42)
     measureB    = MeasurementModel(seed=100)
-    measureTwin = MeasurementModel(seed=999)
+    measureTwin = MeasurementModel(seed=999, is_twin=True)
     # Per-connection, like the plants above: the pipeline carries a rolling
     # residual window and a UKF, so two judges on two tabs must not share one.
     ml = InferencePipeline() if ML_AVAILABLE else None

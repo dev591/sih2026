@@ -98,7 +98,7 @@ def _residual_for(cfg, hook: dict, severity: float, cyl: int, sigma: np.ndarray)
         biases[hook["key"]][cyl] = hook["sign"] * severity * 100.0
 
     plant, twin = MVEM(cfg), MVEM(cfg)
-    mp, mt = MeasurementModel(seed=7), MeasurementModel(seed=999)
+    mp, mt = MeasurementModel(seed=7), MeasurementModel(seed=999, is_twin=True)
     for _ in range(N_SETTLE):
         plant.step(1.0, plant_params, atm, THROTTLE)
         twin.step(1.0, nominal, atm, THROTTLE)
