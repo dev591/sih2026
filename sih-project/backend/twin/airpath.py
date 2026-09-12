@@ -257,3 +257,63 @@ def propeller_power_kw(cfg: dict, rpm: float, p_amb_hPa: float,
     rho_air = (p_amb_hPa * 100.0) / (R * max(oat_K, 1.0))
     p_prop_w = cp * rho_air * n_prop_rps ** 3 * prop["diameter_m"] ** 5
     return p_prop_w / 1000.0
+
+
+# ---------------------------------------------------------------------------
+# ρ₄ — first-law energy closure
+# ---------------------------------------------------------------------------
+# Design PDF Eq. 12, verbatim: chemical power in equals useful work out plus
+# every loss path.
+#
+#     rho4 = mdot_f*Q_LHV - P_brake - (mdot_a+mdot_f)*cp_ex*(T_egt-T_inf)
+#            - sum_i( hA*(T_cht_i - T_cool) )
+#
+# UNLIKE rho1 and rho5, this is not two independent estimates of one quantity —
+# it is a SINGLE conservation law checked against ONE stream of measurements.
+# No twin comparison is needed or wanted: "In a correct model rho4/(mdot_f*
+# Q_LHV) sits within a few per cent across the envelope" (design PDF), which is
+# a statement about the measured data closing on itself, not about plant
+# agreeing with twin.
+#
+# It was instead implemented as `-fuel_gap*10.0 + cht_gap*0.42` — a
+# hand-weighted blend of two PLANT-VS-TWIN gaps (fuel flow and mean CHT), which
+# is neither the first law nor checkable against the design's own "within a
+# few percent" criterion, since a plant/twin gap on identical nominal params
+# is zero by construction — the same disease as rho1 and rho5 had.
+def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
+                      map_hPa: float, iat_K: float,
+                      egt_C: list, cht_C: list,
+                      p_amb_hPa: float, oat_K: float) -> float:
+    """
+    Raw energy imbalance in kW (not yet normalised by mdot_f*Q_LHV — the
+    caller does that, matching the design's stated criterion).
+
+    P_brake uses the propeller-dynamometer estimate (Path B of rho5): the
+    design PDF calls the propeller the only available torque sensor on a
+    flight engine ("Flight engines are not instrumented for shaft torque, but
+    a propeller is itself a calibrated dynamometer"), so it is what "T_brake"
+    means here. Air mass flow uses Path 1 (speed-density) as the reference
+    estimate, per the design's own convention in §5.2 ("Choosing Path 1 as
+    reference").
+    """
+    m = cfg.get("mvem", cfg)
+    q_lhv = cfg["fuel"]["Q_LHV_J_per_kg"]
+    cp_ex = m.get("cp_exhaust_J_per_kgK", 1150.0)
+    fin_area = m["thermal"]["fin_area_m2"]
+    h_head = m["thermal"]["head_htc_W_per_m2K"]
+    t_cool = m["thermal"]["coolant_temp_K"]
+
+    m_a = path1_speed_density(cfg, map_hPa, iat_K, rpm)
+    p_brake_w = propeller_power_kw(
+        cfg, rpm, p_amb_hPa, oat_K, cfg["propeller"]["assumed_tas_mps"]
+    ) * 1000.0
+
+    t_inf = oat_K
+    egt_mean_K = sum(egt_C) / len(egt_C) + 273.15
+    exhaust_enthalpy_w = (m_a + fuel_flow_kgps) * cp_ex * (egt_mean_K - t_inf)
+
+    heat_rejection_w = sum(h_head * fin_area * (t + 273.15 - t_cool) for t in cht_C)
+
+    chem_power_w = fuel_flow_kgps * q_lhv
+    imbalance_w = chem_power_w - p_brake_w - exhaust_enthalpy_w - heat_rejection_w
+    return imbalance_w / 1000.0

@@ -17,6 +17,7 @@ from amplifying noise into very large numbers under small deviations.
 import math
 
 from twin.airpath import (
+    energy_closure_kw,
     indicated_power_kw,
     path1_speed_density,
     path2_compressor_map,
@@ -95,14 +96,27 @@ def compute_residuals(
     rho3 = None
 
     # ── ρ₄ — energy closure (first law) ──────────────────────────────────
-    # Combines fuel-flow gap and mean CHT gap.  Catches anything that changes
-    # where fuel energy goes (cooling degradation, combustion efficiency).
-    fuel_gap = (
-        (measured["fuel_flow_kgps"] - predicted["fuel_flow_kgps"])
-        / max(predicted["fuel_flow_kgps"], 1e-9)
+    # A GENUINE conservation-law check, per design PDF Eq. 12: chemical power
+    # in equals useful work out plus every loss path. UNLIKE rho1/rho5, this
+    # is not two independent estimates of one quantity — it is a single
+    # physical law checked against ONE stream of MEASURED data. No twin
+    # comparison needed or wanted: "In a correct model rho4/(mdot_f*Q_LHV)
+    # sits within a few per cent across the envelope" is a statement about the
+    # measurement closing on itself.
+    #
+    # This was instead `-fuel_gap*10.0 + cht_gap*0.42` — a hand-weighted blend
+    # of two PLANT-VS-TWIN gaps, which is neither the first law nor checkable
+    # against the design's own "within a few percent" criterion (a plant/twin
+    # gap on identical nominal params is zero by construction — same disease
+    # rho1 and rho5 had).
+    imbalance_kw = energy_closure_kw(
+        cfg, measured["fuel_flow_kgps"], measured["rpm"],
+        measured["map_hPa"], measured["iat_K"],
+        measured["egt_C"], measured["cht_C"],
+        measured["p_amb_hPa"], measured["oat_K"],
     )
-    cht_gap  = (sum(measured["cht_C"]) - sum(predicted["cht_C"])) / N_cyl
-    rho4     = -fuel_gap * 10.0 + cht_gap * 0.42
+    chem_power_kw = measured["fuel_flow_kgps"] * cfg["fuel"]["Q_LHV_J_per_kg"] / 1000.0
+    rho4 = imbalance_kw / max(chem_power_kw, 1e-6)
 
     # ── ρ₅ — power closure via propeller dynamometer ─────────────────────
     # A GENUINE parity relation, same fix as ρ₁: two independent estimates of
