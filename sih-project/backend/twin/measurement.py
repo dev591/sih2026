@@ -432,12 +432,13 @@ class MeasurementModel:
 
         # ---- rpm: discrete, tooth-triggered, and dead below arming speed ----
         rpm_spec = _CH["rpm"]
-        rpm_true = phys["rpm"]
         updates = float(rpm_spec["wheel"]["updates_per_rev"])
-        # One tooth of quantisation; amplitude-based arming means a VR pickup
-        # reports NOTHING when the shaft is barely turning.
-        rpm_q = round(rpm_true * updates / 60.0) * 60.0 / updates if rpm_true > 0 else 0.0
-        rpm_out = rpm_q + self._n("rpm", add_noise)
+        # Torsional ripple is REAL shaft-speed variation, not measurement noise,
+        # so it is added BEFORE the pickup quantises — otherwise the reported
+        # value is knocked off the tooth grid and the discreteness, which is the
+        # whole observable point of a variable-reluctance sensor, disappears.
+        rpm_true = phys["rpm"] + self._n("rpm", add_noise)
+        rpm_out = round(rpm_true * updates / 60.0) * 60.0 / updates if rpm_true > 0 else 0.0
 
         turbo = phys["turbo_rpm"] + self._n("turbo_rpm", add_noise)
 
