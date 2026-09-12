@@ -1,0 +1,174 @@
+"""
+AIR-PATH ESTIMATORS — the two independent estimates of air mass flow.
+
+Why this module exists
+----------------------
+The design's central claim is over-determination: several INDEPENDENT estimates
+of the same physical quantity, computed from DIFFERENT sensor sets, which agree
+on a healthy engine and disagree in a fault-specific way when something breaks.
+ρ₁ is the first of those comparisons.
+
+It was not implemented that way. `residuals.py` computed
+
+    rho1 = measured["air_mass_flow"] - predicted["air_mass_flow"]
+
+which is the plant's air mass flow minus the twin's — the same estimator on two
+different models, not two estimators on one data stream. That is an ordinary
+model-mismatch residual, and with plant and twin on identical nominal params it
+is zero by construction, which is exactly why ml/data/jitter_report.json lists
+rho1 as a dead channel. The design PDF warns that "an evaluator familiar with
+parity-space methods will check", and this is what they would find.
+
+The two estimators below are the real thing. Both run on MEASURED channels:
+
+  PATH 1 — speed-density.    ṁ = η_v · p_im · V_d · N / (R · T_im · 120)
+           sensors: MAP, IAT, crank speed.        model: η_v correlation.
+
+  PATH 2 — compressor map.   ṁ = φ · ρ₀₁ · A · U_c  via the Ellipse model
+           sensors: turbo speed, MAP, ambient pressure, OAT.
+           model: the compressor map.
+
+They share MAP, which is unavoidable and physically honest — both paths
+legitimately depend on boost. Everything else differs: Path 1 leans on intake
+temperature and crank speed, Path 2 on turbo speed and ambient conditions. A
+compressor fault changes the relationship between shaft speed and delivered
+pressure ratio, so Path 2 departs while Path 1 does not. That is the
+information ρ₁ is supposed to carry.
+
+Both estimators deliberately use NOMINAL model constants. An onboard estimator
+does not know the engine's current degradation — if it did, the residual would
+absorb the fault and report nothing.
+
+The Ellipse equations live here rather than in mvem.py so the plant and the
+residual generator call the SAME code. Duplicating them would let the two
+drift, and a parity residual computed against a stale copy of the compressor
+map is worse than no parity residual at all.
+"""
+
+from __future__ import annotations
+
+import math
+
+# Standard reference temperature for corrected speed.
+T_REF = 288.15
+
+
+def _gas(cfg: dict) -> tuple[float, float, float]:
+    """(R, gamma, cp_air) with the same defaults MVEM uses."""
+    m = cfg["mvem"] if "mvem" in cfg else cfg
+    return (
+        m.get("R_air_J_per_kgK", 287.05),
+        m.get("gamma_air", 1.4),
+        m.get("cp_air_J_per_kgK", 1005.0),
+    )
+
+
+def _comp(cfg: dict) -> dict:
+    return (cfg["mvem"] if "mvem" in cfg else cfg)["compressor"]
+
+
+def _ve(cfg: dict) -> dict:
+    return (cfg["mvem"] if "mvem" in cfg else cfg)["volumetric_efficiency"]
+
+
+def volumetric_efficiency(cfg: dict, map_hPa: float, rpm: float) -> float:
+    """
+    Nominal η_v from the (boost, speed) correlation.
+
+    NOMINAL on purpose — no eta_v_scale. This is what an onboard estimator can
+    know, and using the true degraded value would make Path 1 track the fault
+    instead of revealing it.
+    """
+    ve = _ve(cfg)
+    p_im_bar = max(map_hPa / 1000.0, 0.0)
+    n_krpm = rpm / 1000.0
+    eta_v = (
+        ve["correlation_c0"]
+        + ve["correlation_c1"] * math.sqrt(p_im_bar)
+        + ve["correlation_c2"] * n_krpm
+        + ve["correlation_c3"] * n_krpm ** 2
+    )
+    return min(max(eta_v, 0.5), 1.05)
+
+
+def compressor_ellipse(cfg: dict, w_tc: float, Pi_c: float,
+                       p01: float, T01: float) -> tuple[float, float]:
+    """
+    Leufven & Eriksson Ellipse model — Control Engineering Practice 21 (2013)
+    1871-1883, validated by the authors against 236 real compressor maps to
+    under 2.5% mean error in the normal operating region.
+
+    Given shaft speed and the pressure ratio currently being demanded, returns
+    (mdot_c, eta_c). NOT slaved to the induction flow, which is what makes it
+    an independent estimate rather than a restatement of Path 1.
+
+    p01/T01 are compressor INLET conditions (ambient), in Pa and K.
+    """
+    R, gamma, cp_air = _gas(cfg)
+    c = _comp(cfg)
+    d_c = c["impeller_diameter_m"]
+
+    u_c = max(w_tc * d_c / 2.0, 1.0)
+
+    n_corr = (w_tc * 60.0 / (2 * math.pi)) / math.sqrt(max(T01, 1.0) / T_REF)
+    speed_ratio = max(n_corr, 1.0) / c["n_corr_design_rpm"]
+
+    psi_max = c["psi_max_design"] * speed_ratio ** c["psi_speed_exponent"]
+    phi_max = c["phi_max_design"] * speed_ratio ** c["phi_speed_exponent"]
+
+    # Pi_c < 1 is a legitimate restriction/choke state, not an error.
+    pi_eff = max(Pi_c, 1e-3)
+    psi = 2.0 * cp_air * T01 * (pi_eff ** ((gamma - 1) / gamma) - 1.0) / u_c ** 2
+
+    # Past the ellipse the compressor cannot support this ratio at this speed;
+    # cap psi just inside psi_max so phi collapses rather than clamping Pi_c.
+    psi_ratio = min(max(psi / max(psi_max, 1e-6), 0.0), 0.999)
+    phi = max(phi_max * (1.0 - psi_ratio ** c["c_psi"]) ** (1.0 / c["c_phi"]), 0.0)
+
+    rho01 = p01 / (R * max(T01, 1.0))
+    area = math.pi * d_c ** 2 / 4.0
+    mdot_c = phi * rho01 * area * u_c
+
+    phi_peak = 0.55 * phi_max
+    n_dev = (n_corr - c["n_corr_design_rpm"]) / max(c["n_corr_design_rpm"], 1.0)
+    eta_c = c["efficiency_nominal"] - 8.0 * (phi - phi_peak) ** 2 - 0.5 * n_dev ** 2
+    eta_c = min(max(eta_c, 0.35), c["efficiency_nominal"])
+
+    return float(mdot_c), float(eta_c)
+
+
+# ---------------------------------------------------------------------------
+# The two parity paths, on MEASURED channels
+# ---------------------------------------------------------------------------
+
+def path1_speed_density(cfg: dict, map_hPa: float, iat_K: float,
+                        rpm: float) -> float:
+    """
+    Sensors: MAP, IAT, crank speed. Model: the η_v correlation.
+
+    ṁ = η_v · p_im · V_d · N / (R · T_im · 120), with 120 = 2 rev/cycle × 60 s.
+    """
+    R, _, _ = _gas(cfg)
+    v_d = cfg["geometry"]["displacement_m3"]
+    eta_v = volumetric_efficiency(cfg, map_hPa, rpm)
+    p_im = map_hPa * 100.0
+    return float(eta_v * p_im * v_d * rpm / (R * max(iat_K, 1.0) * 120.0))
+
+
+def path2_compressor_map(cfg: dict, turbo_rpm: float, map_hPa: float,
+                         p_amb_hPa: float, oat_K: float) -> float:
+    """
+    Sensors: turbo shaft speed, MAP, ambient pressure, OAT.
+    Model: the compressor map.
+
+    The plant lumps compressor delivery into manifold pressure (mvem.py uses
+    Pi_c = p_im / p_atm and models no intercooler pressure drop), so MAP is the
+    consistent measure of compressor outlet here. It is a shared sensor with
+    Path 1, but the rest of the inputs — shaft speed and ambient conditions —
+    are Path 2's alone, and they are what a compressor fault moves.
+    """
+    w_tc = turbo_rpm * 2.0 * math.pi / 60.0
+    p01 = max(p_amb_hPa, 1.0) * 100.0
+    pi_c = (map_hPa * 100.0) / p01
+    mdot_c, _ = compressor_ellipse(cfg, w_tc, pi_c, p01, max(oat_K, 1.0))
+    return mdot_c

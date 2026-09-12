@@ -1,4 +1,6 @@
 import numpy as np
+
+from .airpath import compressor_ellipse
 import random
 
 class MVEM:
@@ -155,44 +157,17 @@ class MVEM:
 
     def _compressor_ellipse(self, w_tc: float, Pi_c: float, p01: float, T01: float):
         """
-        Leufven & Eriksson Ellipse model. Given the compressor's current
-        shaft speed and the pressure ratio the intake-filling dynamics are
-        currently demanding, returns (mdot_c, eta_c) — NOT slaved to mdot_a.
-        This is what turns rho1 (speed-density vs compressor) from a
-        structural identity into a real, independent residual.
+        Leufven & Eriksson Ellipse model — see twin/airpath.py, which now owns
+        the equations.
+
+        The plant and the PARITY RESIDUAL GENERATOR must evaluate the same
+        compressor map: rho1 compares an induction-side estimate against a
+        compressor-side one, and if the two sides used separate copies of these
+        equations they would drift and rho1 would be measuring the drift rather
+        than the engine. Hence one implementation, called from both.
         """
-        U_c = w_tc * self.D_c / 2.0
-        U_c = max(U_c, 1.0)  # avoid div-by-zero at near-zero shaft speed
-
-        N_corr = (w_tc * 60.0 / (2 * np.pi)) / np.sqrt(max(T01, 1.0) / self._T_REF)
-        speed_ratio = max(N_corr, 1.0) / self._n_corr_design
-
-        psi_max = self._psi_max_design * speed_ratio ** self._psi_speed_exp
-        phi_max = self._phi_max_design * speed_ratio ** self._phi_speed_exp
-
-        Pi_c_eff = max(Pi_c, 1e-3)  # the Ellipse model is defined for Pi_c < 1 too — §1.3
-        psi = 2.0 * self.cp_air * T01 * (Pi_c_eff ** ((self.gamma - 1) / self.gamma) - 1.0) / U_c ** 2
-
-        # Beyond the ellipse (surge/stall boundary): the compressor cannot
-        # support this pressure ratio at this speed. Cap psi just under
-        # psi_max rather than clamping Pi_c itself — phi collapses toward
-        # zero, mdot_c falls, and the filling equation (dp_im/dt ~ mdot_c -
-        # mdot_a < 0) pulls p_im back down on its own. This is the
-        # self-correcting feedback the slaved m_c never had.
-        psi_ratio = np.clip(psi / max(psi_max, 1e-6), 0.0, 0.999)
-        phi = phi_max * (1.0 - psi_ratio ** self._c_psi) ** (1.0 / self._c_phi)
-        phi = max(phi, 0.0)
-
-        rho01 = p01 / (self.R * max(T01, 1.0))
-        area = np.pi * self.D_c ** 2 / 4.0
-        mdot_c = phi * rho01 * area * U_c
-
-        phi_peak = 0.55 * phi_max
-        n_dev = (N_corr - self._n_corr_design) / max(self._n_corr_design, 1.0)
-        eta_c = self.eta_c_max - 8.0 * (phi - phi_peak) ** 2 - 0.5 * n_dev ** 2
-        eta_c = float(np.clip(eta_c, 0.35, self.eta_c_max))
-
-        return float(mdot_c), eta_c
+        return compressor_ellipse(self.cfg, float(w_tc), float(Pi_c),
+                                  float(p01), float(T01))
 
     def step(self, dt: float, params: dict, atm: dict, throttle_pct: float):
         cd_inj = np.array(params.get('cd_inj', np.ones(self.N_cyl)))
