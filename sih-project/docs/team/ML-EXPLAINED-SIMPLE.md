@@ -164,10 +164,23 @@ than our actual target (piston, not turbofan) — that's fine, it's not meant
 to be "our model," it's meant to prove the *architecture and training
 approach* isn't circular.
 
-**Result (real, not synthetic — verified 2026-09-11):** RMSE 8.62 cycles,
-NASA competition score 1352850, within-±10% band 35%. This is the evidence
-behind the sentence: *"our ML pipeline ran unmodified on NASA's real
-flight-condition data, and here's the number."*
+**Measured result** (from the committed notebook output): RMSE **49.43**
+cycles, NASA asymmetric score **20,317,658**, within-±10% band **39.4%**,
+α–λ **0.394**. This is the evidence behind the sentence: *"our ML pipeline ran
+unmodified, with zero problem-specific tuning, on NASA's real flight-condition
+data."*
+
+Lead with **transferability, not the score.** The point is that it runs at all
+on data we did not generate — that is what answers "you're just memorising
+your own simulator." Published N-CMAPSS baselines beat this RMSE
+comfortably, so do not present it as a competitive number; if asked why it is
+high, the honest answer is the same reason it counts: zero tuning, a single
+subset (DS01), and an architecture built for a piston engine, not a turbofan.
+
+> ⚠️ This page previously said RMSE 8.62 / score 1352850. **Those numbers are
+> in no artefact in the repo** — corrected, do not reintroduce. See
+> `ml/eval/metrics.md` §1 for the caveat about re-capturing the `REAL_DATA`
+> flag before this goes on a slide.
 
 ---
 

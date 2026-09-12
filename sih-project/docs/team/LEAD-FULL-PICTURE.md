@@ -97,15 +97,31 @@ the live system against exactly the kind of thing that goes wrong in a real
 demo (reconnects, extended runtime, cold starts) and fixed what we found.
 That's a stronger story than "it worked in rehearsal."
 
-## The N-CMAPSS result — your strongest single credibility number
+## The N-CMAPSS result — answers circularity, but it is NOT a score claim
 
 Everything else was validated on data OUR OWN simulator produced — which
 a sharp judge will call circular ("your model could just be memorizing your
 own simulator"). We ran the exact same ML pipeline, unmodified, on a REAL
 NASA dataset (N-CMAPSS — real turbofan engines, real recorded flight
-conditions, not our data). Result: **RMSE 8.62 cycles, NASA competition score
-1352850**, `REAL_DATA=True`. This is a real, verified, non-circular result —
-say the number, don't just assert the claim.
+conditions, not our data).
+
+Measured result, from the committed notebook output: **RMSE 49.43 cycles,
+NASA asymmetric score 20,317,658, within ±10% band 39.4%, α–λ 0.394.**
+
+**Say it as a transferability claim, not a leaderboard claim:** "our pipeline
+runs unmodified, with zero problem-specific tuning, on real recorded flight
+data we did not generate." That is what defeats the circularity objection, and
+it is true. Published N-CMAPSS baselines score far better on RMSE, so framing
+this as a strong *score* invites a comparison it loses — and the honest reason
+it is high is exactly the thing that makes it valuable: zero tuning, one
+subset (DS01), and an architecture designed for a different engine.
+
+> ⚠️ **An earlier version of this page claimed RMSE 8.62 / score 1352850.
+> Those numbers appear in no artefact in this repository** and have been
+> corrected here and in `ML-EXPLAINED-SIMPLE.md`. Do not reintroduce them.
+> Before quoting even the correct number on a slide, re-run the notebook's
+> loader cell so the `REAL_DATA=True` line is actually captured in the
+> committed output — see the caveats in `ml/eval/metrics.md` §1.
 
 ## What we honestly do NOT claim (say this before a judge finds it — it builds trust)
 

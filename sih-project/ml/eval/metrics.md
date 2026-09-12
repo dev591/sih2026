@@ -20,9 +20,31 @@ collapsed air path is fixed, the incidence-matrix degeneracy is fixed, and
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| RMSE | _pending_ | cycles |
-| NASA asymmetric score | _pending_ | lower is better |
-| Within ±10% band | _pending_ | % of test windows |
+| RMSE | **49.43** | cycles |
+| NASA asymmetric score | **20 317 658** | lower is better |
+| Within ±10% band | **39.4 %** | % of test windows |
+| α–λ accuracy | **0.394** | |
+| False-alarm proxy | **0.104** | |
+
+Source: the committed stored output of `ml/benchmarks/ncmapss_baseline.ipynb`
+(cell 11), model 42,499 parameters, DS01 at full 1 Hz.
+
+> ⚠️ **Two caveats that must travel with this number.**
+>
+> 1. **The `REAL_DATA` flag output was not preserved.** Of 15 cells, only 4
+>    carry stored output (device, parameter count, these metrics, and the saved
+>    figure). The cell that prints `REAL_DATA = True/False` is not among them.
+>    The rule at the bottom of this section — *never quote a number printed
+>    with `REAL_DATA=False`* — therefore cannot currently be discharged from
+>    the artefact alone. Re-run the loader cell and commit its output before
+>    quoting this on a slide. The surrounding evidence (the real DS01 `.h5` is
+>    downloaded and verified, and both 2026-09-11 handoff notes describe a real
+>    run) says it was real data, but that is inference, not the artefact.
+> 2. **This is a transferability result, not a competitive score.** Published
+>    N-CMAPSS baselines land far lower on RMSE. The defensible claim is "the
+>    pipeline runs unmodified, with zero tuning, on real flight-condition data
+>    we did not generate" — which is what answers the circularity objection.
+>    Framing 49.43 as a *competitive* score invites a comparison it loses.
 
 Dataset downloaded, verified, extracted: `N-CMAPSS_DS01-005.h5` (2.68 GB,
 NASA PCoE official mirror). DS01 has exactly 6 dev units and 4 test units
