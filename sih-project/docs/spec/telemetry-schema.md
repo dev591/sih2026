@@ -53,19 +53,19 @@ skip.
   "oil_press_bar": 3.42,
   "oil_temp_C": 96.3,
   "fuel_flow_kgps": 0.00612,    // delivered fuel mass flow
-  "fuel_rail_bar": 1.68,
+  "fuel_rail_bar": 900.0,       // common rail: 250-2000+ bar.  [UNMODELLED]
   "lambda": 1.42,               // wideband UEGO. Path 3 depends on this.
   "turbo_rpm": 118400.0,        // turbocharger shaft speed
   "comp_out_p_hPa": 1240.0,     // compressor delivery pressure (before intercooler)
   "comp_out_T_K": 372.4,
-  "inj_timing_deg": 12.4,       // injection timing advance  <-- PS component B, named
-  "bus_voltage_V": 27.8,        // battery/alternator health  <-- PS component B, named
-  "alternator_A": 14.2,         //                            <-- PS component B, named
+  "inj_timing_deg": 12.4,       // PS component B, named       [UNMODELLED]
+  "bus_voltage_V": 27.8,        // PS component B, named       [UNMODELLED]
+  "alternator_A": 14.2,         // PS component B, named       [UNMODELLED]
   "throttle_pct": 72.0,
-  "vib_rms_g": [0.42, 0.44, 0.61, 0.43],   // per-cylinder-region RMS, FEATURE not raw
+  "vib_rms_g": [0.42, 0.44, 0.61, 0.43],   // per-cyl-region RMS, FEATURE  [UNMODELLED]
 
   "altitude_ft": 18000.0,       // from the flight sim / mission profile
-  "tas_mps": 61.2,              // true airspeed — needed for propeller advance ratio J
+  "tas_mps": 61.2,              // true airspeed, for propeller J   [UNMODELLED]
   "oat_K": 251.6                // outside air temperature
 }
 ```
@@ -73,6 +73,59 @@ skip.
 **`inj_timing_deg`, `bus_voltage_V` and `alternator_A` are three channels and
 five minutes of work, and they prove the team read the actual problem
 statement text.** Do not drop them.
+
+### `[UNMODELLED]` — what that marker means
+
+Six fields are **constants**, not measurements: nothing in the MVEM computes
+them. There is no electrical model, no injection-timing schedule, no vibration
+model and no airframe performance model. They are present because the problem
+statement names them and the schema is frozen; they are flagged here so nobody
+presents a frozen digit as live instrumentation.
+
+The single source is `UNMODELLED` in `backend/main.py`, mirrored by the same
+block in `frontend/src/mock/missionGenerator.ts`. **Keep the two identical** —
+they previously disagreed (the mock jittered these, the backend sent bare
+constants), so the same channel appeared to move in SIMULATED and freeze in
+LIVE.
+
+They are deliberately **not** given synthetic jitter. A number that moves
+without a cause asserts that something is being measured — the same principle
+that makes parity path 4 return `null` rather than reuse another path's
+estimate. A frozen digit is at least honestly frozen.
+
+### Instrumentation provenance — expect to be asked this
+
+A mechanical engineer looking at this channel set will notice it resembles a
+**spark-ignition** installation, and they are right to ask. The target engine
+is compression-ignition: DRDO's published
+[180 hp Diesel Engine for UAV](https://drdo.gov.in/drdo/en/offerings/products/180-hp-diesel-engine-uav)
+(VRDE Ahmednagar), replacing the Austro E4/AE300 that TAPAS-BH-201 flies —
+both common-rail diesels. The honest position per channel:
+
+| Channel | On a production aero-diesel FADEC? | Why it is here |
+|---|---|---|
+| `cht_C` per cylinder | **No.** Aero-diesels are liquid-cooled monobloc; there is no spark plug, so the gasket-washer probe is physically impossible. Real channel is coolant temperature. | **Flight-test instrumentation.** Development and test-cell articles routinely fit bayonet/thermowell thermocouples per cylinder that production omits. |
+| `egt_C` per cylinder | **Not standard.** Production instruments turbine-inlet or a single post-turbo EGT for over-temp protection. | **Flight-test instrumentation**, and still physically meaningful on a diesel — it is how injector balance and turbine protection are assessed. |
+| `lambda` | **Measurable but not a control parameter.** A diesel has no stoichiometric setpoint; it runs lean and load is set by injected quantity. | **Flight-test UEGO.** Kept as a *measured* channel because parity Path 3 needs an air estimate from the fuel side that is independent of the air side. |
+| `fuel_rail_bar` | **Yes — and it is the real load parameter.** | Present but `[UNMODELLED]`. |
+| `map_hPa` | **Yes, as boost.** But a diesel is unthrottled, so it is an *observable*, not the load command. | Present and modelled. |
+| `oil_press_bar`, `oil_temp_C`, `rpm`, `fuel_flow_kgps`, `bus_voltage_V`, `alternator_A` | Yes. | — |
+| `turbo_rpm` | Test-cell/dyno instrument, not production. | Needed for parity Path 2. |
+
+**Missing, and worth acknowledging:** coolant temperature, gearbox/PSRU oil
+temperature, oil level, propeller speed distinct from crankshaft speed, and
+FADEC channel A/B status — all of which the real Austro log carries.
+
+The defensible framing is therefore: *this is a **development-instrumented**
+engine, which is what a digital-twin programme would actually fly*, not a
+production FADEC bus. Say that before a judge infers the channel list was
+copied from a petrol engine.
+
+> ⚠️ The combustion model does not yet match this. `mvem.py` currently runs a
+> spark-ignition mixture schedule (`lambda_full_power = 0.98`, rich of
+> stoichiometric — impossible for compression ignition) with an air-led load
+> path. Correcting that to a fuel-led diesel is Phase 4 of the fidelity plan.
+> Until then, **do not claim the combustion model is diesel-correct.**
 
 **On `engine_id`:** the platform is twin-engined and that is a free reference
 channel, not a cosmetic detail. Two nominally identical engines, same fuel,
