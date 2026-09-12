@@ -104,7 +104,7 @@ export function StripChart({
       ...Array.from({ length: N_CYL }, (_, i) => ({
         label: `cyl ${i + 1}`,
         stroke: CYL_COLOURS[i],
-        width: 1.4,
+        width: 2,
         points: { show: false },
       })),
     ];
@@ -112,8 +112,8 @@ export function StripChart({
       series.push({
         label: 'twin',
         stroke: C.twin,
-        width: 1.2,
-        dash: [4, 4],
+        width: 1.8,
+        dash: [5, 4],
         points: { show: false },
       });
     }
@@ -132,13 +132,23 @@ export function StripChart({
           // rescale pass in charge, so y still auto-fits normally.
           range: () => [xNow.current - WINDOW, xNow.current] as [number, number],
         },
+        y: {
+          // A tight auto-fit hugs the traces against the top/bottom edge,
+          // which makes ordinary noise look like it's slamming into a limit.
+          // Padding the range 15% on each side gives the eye headroom to read
+          // the trend instead of the frame.
+          range: (_u, min, max) => {
+            const pad = (max - min) * 0.15 || 1;
+            return [min - pad, max + pad];
+          },
+        },
       },
       axes: [
         {
           stroke: C.textDim,
           grid: { stroke: C.line, width: 1 },
           ticks: { stroke: C.line2 },
-          font: '10px ui-monospace, Menlo, monospace',
+          font: '11.5px ui-monospace, Menlo, monospace',
           // Force whole-second spacing. Without this uPlot picks fractional
           // increments and the labels repeat ("0s 0s 1s 1s") once the window
           // is short, which looks broken on stage.
@@ -149,8 +159,16 @@ export function StripChart({
           stroke: C.textDim,
           grid: { stroke: C.line, width: 1 },
           ticks: { stroke: C.line2 },
-          font: '10px ui-monospace, Menlo, monospace',
-          size: 52,
+          font: '11.5px ui-monospace, Menlo, monospace',
+          // More, finer gridlines than uPlot's default pick — the whole point
+          // of this axis is reading off a value, and a 10-degree window with
+          // only two labelled lines forces a guess at everything in between.
+          // uPlot's default tick spacing is tuned for a much taller plot than
+          // this strip; lowering `space` (min px between ticks) is what
+          // actually lets it use the finer increments above.
+          space: 28,
+          incrs: [0.2, 0.5, 1, 2, 5, 10, 20, 50, 100],
+          size: 56,
         },
       ],
       series,
