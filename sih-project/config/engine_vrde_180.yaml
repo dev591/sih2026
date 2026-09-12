@@ -77,8 +77,61 @@ limits:
 fuel:
   type: jet_a1                   # aero-diesel runs heavy fuel
   Q_LHV_J_per_kg: 43.0e+6        # lower heating value
-  AFR_stoich: 14.5
+  AFR_stoich: 14.5               # ~14.5-14.7 by mass for both diesel and
+                                  # gasoline — chemically similar, this figure
+                                  # was already correct and needs no fix
   provenance: published
+
+  # ---------------------------------------------------------------------------
+  # FUEL-LED SCHEDULE — a real compression-ignition diesel, not spark-ignition
+  # ---------------------------------------------------------------------------
+  # provenance: assumed (the constants), published (the architecture — every
+  # source consulted on aero-diesel/common-rail control agrees the load path
+  # is fuel-led: power-lever position -> commanded injection quantity ->
+  # torque, with boost a CONSEQUENCE of exhaust enthalpy, not the control
+  # input). This replaced a load path that commanded a TARGET LAMBDA from
+  # throttle position and derived fuel FROM measured air mass — spark-ignition
+  # logic (the mixture strategy a stoichiometric petrol engine actually uses),
+  # physically impossible for a diesel: compression ignition has no
+  # stoichiometric setpoint to hold, runs unthrottled and always lean, and
+  # sizes fuel to the injector, not to a target air-fuel ratio.
+  #
+  # rated_fuel_flow_kgps sizes the top of the schedule so 100% throttle,
+  # unconstrained by boost, delivers close to the rated 134.2 kW:
+  #     mdot_f = P_rated / (eta_i * Q_LHV) = 134200 / (0.50 * 43.0e6)
+  #            = 0.006242 kg/s
+  # This is the fuel needed for RATED INDICATED power; actual brake power lands
+  # a little below it once friction is subtracted, which is the correct
+  # physical relationship (T_ind - T_fric = T_brake), not an error to correct
+  # away.
+  rated_fuel_flow_kgps: 0.006242
+
+  # Idle fuel as a fraction of rated. Diesels idle very lean (research: idle
+  # lambda commonly 4-6+) because unlike a throttled SI engine they are not
+  # air-limited at idle — the FADEC simply meters little fuel. ~10-15% of
+  # rated flow is a typical order-of-magnitude figure for a common-rail
+  # diesel at idle; no published VRDE idle-fuel figure exists, so this is an
+  # engineering estimate in the middle of that range, in the same spirit as
+  # every other "assumed" constant in this file.
+  idle_fuel_frac: 0.12
+
+  # SMOKE LIMITER — a ceiling on commanded fuel, not the control input. This
+  # is how a diesel's air path actually constrains load: injecting more fuel
+  # than the available air can burn cleanly produces visible smoke and
+  # unacceptable particulate/soot, so the FADEC caps injection quantity to
+  # keep the in-cylinder mixture at or leaner than this ratio. Sourced from
+  # the same research establishing this engine's identity: real aero-diesels
+  # run roughly lambda 1.15-1.3 (AFR ~17-20) at full power, which in practice
+  # IS the smoke limit being enforced. 1.15 is the LEAN (safe) end of that
+  # range — a conservative ceiling, so the twin does not present a smokier
+  # exhaust than a real FADEC would ever command.
+  #
+  # This is what makes boost a CEILING on power, not a target: above the
+  # critical altitude, less boost means a tighter smoke limit means less fuel
+  # is ALLOWED regardless of what the throttle schedule asks for — the correct
+  # mechanism behind "flat power to 11,000 ft, then falls", now enforced at
+  # the fuel-metering point instead of only via the wastegate's boost target.
+  lambda_smoke_limit: 1.15
 
 # ---------------------------------------------------------------------------
 # MVEM PARAMETERS — the health parameters theta live here as nominal values.

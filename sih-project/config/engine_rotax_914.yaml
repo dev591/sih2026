@@ -89,6 +89,19 @@ fuel:
   AFR_stoich: 14.7               # spark ignition, stoichiometric gasoline
   provenance: published
 
+  # SPARK-IGNITION MIXTURE SCHEDULE — genuinely correct for THIS engine, unlike
+  # the VRDE profile it replaced there. A carburetted/injected SI engine holds
+  # a TARGET LAMBDA and derives fuel from measured air mass, because it has a
+  # real stoichiometric setpoint to aim at. mvem.py selects this path when
+  # profile.cycle == 'spark_ignition'.
+  # provenance: assumed — lambda_full=0.98 (near-stoichiometric, typical
+  # max-continuous/takeoff margin against detonation and EGT limits);
+  # lambda_idle=1.35 (lean, typical partial-power economy cruise setting) —
+  # not sourced from a published Rotax fuel map, proposed and verified
+  # against backend/gates_check.py.
+  lambda_full_power: 0.98
+  lambda_idle: 1.35
+
 # ---------------------------------------------------------------------------
 # MVEM PARAMETERS
 # ---------------------------------------------------------------------------

@@ -29,15 +29,31 @@ class MVEM:
         self.Q_LHV = self.cfg['fuel']['Q_LHV_J_per_kg']
         self.AFR_st = self.cfg['fuel']['AFR_stoich']
         fuel_cfg = self.cfg['fuel']
-        # provenance: calibrated. Endpoints of the mixture schedule — see the
-        # comment in step() for why this replaced a fixed lambda=K/throttle
-        # relation. lambda_full=1.05 (near-stoichiometric, typical
-        # max-continuous/takeoff target on a turbodiesel to keep EGT/knock
-        # margin); lambda_idle=1.65 (lean, typical partial-power economy
-        # cruise setting) — not sourced from a published VRDE fuel map (none
-        # exists), proposed and verified against backend/gates_check.py.
-        self._lambda_full = fuel_cfg.get('lambda_full_power', 0.98)
-        self._lambda_idle = fuel_cfg.get('lambda_idle', 1.35)
+
+        # ---------------------------------------------------------------
+        # COMBUSTION STRATEGY — selected by profile.cycle, not one model bent
+        # to cover both. A compression-ignition diesel and a spark-ignition
+        # engine schedule fuel by fundamentally different logic; see step()
+        # for the branch. Defaults to 'diesel' (VRDE is the primary profile).
+        # ---------------------------------------------------------------
+        self._cycle = self.cfg.get('profile', {}).get('cycle', 'diesel')
+
+        if self._cycle == 'spark_ignition':
+            # AIR-LED: hold a target lambda, derive fuel from MEASURED air
+            # mass. Genuinely correct here — a spark-ignition engine has a
+            # real stoichiometric setpoint to aim at. provenance: assumed,
+            # see the comment in engine_rotax_914.yaml's fuel block.
+            self._lambda_full = fuel_cfg.get('lambda_full_power', 0.98)
+            self._lambda_idle = fuel_cfg.get('lambda_idle', 1.35)
+        else:
+            # FUEL-LED: FADEC power-lever position commands an injection
+            # quantity directly; boost is a consequence, not an input. See the
+            # comment in engine_vrde_180.yaml's fuel block for why, and
+            # step() for the mechanism (including the smoke limiter, which is
+            # how boost still constrains available power on a diesel).
+            self._rated_fuel_kgps = fuel_cfg.get('rated_fuel_flow_kgps', 0.006242)
+            self._idle_fuel_frac = fuel_cfg.get('idle_fuel_frac', 0.12)
+            self._lambda_smoke_limit = fuel_cfg.get('lambda_smoke_limit', 1.15)
 
         # Indicated thermal efficiency — was a bare local `eta_i = 0.50` in
         # step(), duplicated by hand wherever a nominal value was needed. Now
@@ -90,6 +106,17 @@ class MVEM:
         # produces "flat MAP to critical altitude, then falls" rather than
         # that shape being asserted directly.
         self._map_max_continuous_bar = self.cfg['limits']['manifold_pressure_hPa']['max_continuous'] / 1000.0
+        # 'takeoff' has been in the profile from the start (a real two-tier
+        # FADEC boost limit: a higher short-duration rating for takeoff/max
+        # power, a lower one for sustained cruise, protecting the engine from
+        # thermal/mechanical fatigue at sustained high boost) but was never
+        # read anywhere — the wastegate scaled toward max_continuous at every
+        # throttle setting, including 100%. Falls back to max_continuous if a
+        # profile doesn't define it, so this is not a behaviour change for any
+        # config that lacks the key.
+        self._map_takeoff_bar = self.cfg['limits']['manifold_pressure_hPa'].get(
+            'takeoff', self.cfg['limits']['manifold_pressure_hPa']['max_continuous']
+        ) / 1000.0
         self._wastegate_gain = 14.0  # 1/bar — proportional control on bypass fraction
 
         # --- Propeller load — §1.5. Replaces a made-up quadratic that had
@@ -223,22 +250,46 @@ class MVEM:
             # 2. Cylinder Induction (Path 1 — speed-density)
             self.m_a = eta_v * self.p_im * self.V_d * N_rpm / (self.R * self.T_im * 120.0)
 
-            # FADEC mixture schedule. Was lambda = 1.42/throttle_frac (a fixed
-            # divisor over throttle fraction) — at 72% throttle that is
-            # lambda=1.97, and even at 100% throttle only lambda=1.42. Tested
-            # directly: at 72% throttle, SEA LEVEL, zero altitude penalty,
-            # that schedule capped brake power at 33% of rated — a fuel
-            # ceiling, not a boost-capacity one, and no compressor/turbine
-            # retuning could lift it. Replaced with a linear-in-lambda
-            # schedule between an idle/lean point and a near-stoichiometric
-            # full-power point, which is the normal shape of a real FADEC
-            # mixture map (leanest at low power for economy, richest at max
-            # continuous/takeoff for margin against detonation and EGT
-            # limits) rather than a single hyperbolic curve with no load
-            # dependence at all.
             throttle_frac = throttle_pct / 100.0
-            lambda_target = self._lambda_idle + (self._lambda_full - self._lambda_idle) * throttle_frac
-            target_m_f_total = self.m_a / (self.AFR_st * max(lambda_target, 0.8))
+
+            if self._cycle == 'spark_ignition':
+                # AIR-LED mixture schedule — correct for a spark-ignition
+                # engine, which holds a target lambda and derives fuel from
+                # measured air mass. Linear-in-lambda between an idle/lean
+                # point and a near-stoichiometric full-power point, the normal
+                # shape of a real FADEC/ECU mixture map.
+                lambda_target = self._lambda_idle + (self._lambda_full - self._lambda_idle) * throttle_frac
+                target_m_f_total = self.m_a / (self.AFR_st * max(lambda_target, 0.8))
+            else:
+                # FUEL-LED schedule — a real compression-ignition diesel.
+                #
+                # Was: hold a TARGET LAMBDA from throttle, derive fuel from
+                # measured air mass — spark-ignition logic. Physically
+                # impossible for a diesel: compression ignition has no
+                # stoichiometric setpoint, runs unthrottled and always lean,
+                # and sizes fuel to the injector, not to a target air-fuel
+                # ratio. See the comment on engine_vrde_180.yaml's fuel block
+                # for the full argument and sourcing.
+                #
+                # Now: the power lever commands an injection quantity
+                # directly, linear between an idle floor and the rated
+                # design point —
+                target_m_f_total = (
+                    self._idle_fuel_frac * self._rated_fuel_kgps
+                    + (1.0 - self._idle_fuel_frac) * self._rated_fuel_kgps * throttle_frac
+                )
+                # — capped by the SMOKE LIMITER: however much fuel the power
+                # lever asks for, the FADEC will not inject more than the
+                # available (measured) air mass can burn at or leaner than the
+                # smoke-limit ratio. This is the mechanism that makes boost a
+                # CEILING on power rather than a target: above critical
+                # altitude, or under a compressor fault, less air means a
+                # tighter cap, means less fuel is ALLOWED regardless of what
+                # the throttle schedule asked for — the correct physical
+                # reason "flat power to 11,000 ft, then falls" holds, now
+                # enforced at the fuel-metering point.
+                smoke_limit_m_f = self.m_a / (self.AFR_st * self._lambda_smoke_limit)
+                target_m_f_total = min(target_m_f_total, smoke_limit_m_f)
             self.fuel_cmd = target_m_f_total / self.N_cyl
 
             self.fuel_delivered = cd_inj * self.fuel_cmd * fuel_rail_scale
@@ -361,7 +412,21 @@ class MVEM:
                 # throttle-scheduled MAP target. Quasi-static (algebraic,
                 # not integrated) — the substep rate here is fast enough
                 # that a real wastegate actuator would already have settled.
-                target_map_bar = (throttle_pct / 100.0) * self._map_max_continuous_bar
+                # Below ~90% throttle, target scales to max_continuous exactly
+                # as before (Gate 1 checks MAP at 72% throttle against that
+                # calibration and is unaffected). Above it, target ramps on
+                # toward the takeoff limit — the short-duration rating a real
+                # FADEC allows for max power, which this profile has always
+                # specified and nothing was reading.
+                cruise_frac = 0.90
+                if throttle_frac <= cruise_frac:
+                    target_map_bar = throttle_frac * self._map_max_continuous_bar
+                else:
+                    extra = (throttle_frac - cruise_frac) / (1.0 - cruise_frac)
+                    target_map_bar = (
+                        self._map_max_continuous_bar
+                        + extra * (self._map_takeoff_bar - self._map_max_continuous_bar)
+                    )
                 p_im_bar_now = self.p_im / 1.0e5
                 # Capped below 1.0: a wastegate never seals perfectly, and
                 # the assertion below expects P_turb > 0 whenever fuel
