@@ -3,6 +3,12 @@
 **Read this before touching anything.** Previous session ran out of budget
 mid-Phase-5. Everything below is verified as of the last commit, not assumed.
 
+**Also read `ENGINEERING-STANDARDS.md` in this same directory** — this
+document is status (what's done, what's next); that one is the working
+discipline this codebase is held to (provenance marking, validate-before-
+committing, the three-suite verification gate, honest labelling). Both
+matter; this one alone is not enough.
+
 ## Where things are right now
 
 - **Branch:** `engine-fidelity`, fully pushed to `origin/engine-fidelity`
