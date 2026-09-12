@@ -39,6 +39,14 @@ class MVEM:
         self._lambda_full = fuel_cfg.get('lambda_full_power', 0.98)
         self._lambda_idle = fuel_cfg.get('lambda_idle', 1.35)
 
+        # Indicated thermal efficiency — was a bare local `eta_i = 0.50` in
+        # step(), duplicated by hand wherever a nominal value was needed. Now
+        # the single source of truth shared with parity Path A
+        # (twin/airpath.py::indicated_power_kw) — see the comment on
+        # mvem.combustion.eta_i_nominal in the profile for why sharing it is
+        # not degenerate.
+        self._eta_i = mvem_cfg.get('combustion', {}).get('eta_i_nominal', 0.50)
+
         # --- eta_v(p_im, N) correlation — PRAMANA-DIRECTIVE §1.4 -----------
         ve = mvem_cfg['volumetric_efficiency']
         self._ve_c0 = ve['correlation_c0']
@@ -245,7 +253,7 @@ class MVEM:
             # engine class. Raised toward the middle of that range rather
             # than richening the mixture further (lambda was already at
             # ~1.08, near the smoke limit any real diesel is bounded by).
-            eta_i = 0.50
+            eta_i = self._eta_i
             T_ind_i = eta_i * self.fuel_delivered * self.Q_LHV / max(self.w, 1.0)
             
             # Apply misfire and detonation (discrete/cycle-level)

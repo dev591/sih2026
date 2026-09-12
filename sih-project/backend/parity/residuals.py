@@ -16,7 +16,12 @@ from amplifying noise into very large numbers under small deviations.
 
 import math
 
-from twin.airpath import path1_speed_density, path2_compressor_map
+from twin.airpath import (
+    indicated_power_kw,
+    path1_speed_density,
+    path2_compressor_map,
+    propeller_power_kw,
+)
 
 
 def compute_residuals(
@@ -100,10 +105,36 @@ def compute_residuals(
     rho4     = -fuel_gap * 10.0 + cht_gap * 0.42
 
     # ── ρ₅ — power closure via propeller dynamometer ─────────────────────
-    # Fractional brake-power gap.  Only departs under friction faults;
-    # healthy value is structurally zero.
-    p_pwr = max(predicted["brake_power_kW"], 1e-6)
-    rho5  = (measured["brake_power_kW"] - predicted["brake_power_kW"]) / p_pwr
+    # A GENUINE parity relation, same fix as ρ₁: two independent estimates of
+    # shaft power, both from the MEASURED stream.
+    #
+    #   Path A  fuel flow, crank speed          -> indicated power (combustion)
+    #   Path B  crank speed, p_amb, OAT, TAS    -> propeller dynamometer
+    #
+    # This used to be `measured["brake_power_kW"] - predicted["brake_power_kW"]`
+    # — the plant's torque-balance power minus the twin's. At steady state the
+    # crank's own equilibrium makes T_ind - T_fric - T_pump equal T_load =
+    # P_prop/w BY DEFINITION, so brake_power_kW already secretly equals the
+    # propeller-absorbed power and comparing plant to twin there measures
+    # nothing about which SIDE disagrees. config/engine_vrde_180.yaml's
+    # propeller block has always said this residual is meant to be
+    # "P_indicated - P_prop" — it names the two paths that were never built.
+    #
+    # Both use NOMINAL model constants (eta_i, friction coefficient), so a
+    # bearing-wear fault (raised f_fric_scale in the PLANT only) makes Path A
+    # overestimate power rather than being absorbed into the estimate.
+    #
+    # TAS is not yet a sensed channel (tas_mps is UNMODELLED — see main.py) —
+    # both paths use the same assumed constant the plant's own load model
+    # already uses. A real airspeed sensor is future work; until then this is
+    # a genuine shared limitation, not a hidden one.
+    p_ind  = indicated_power_kw(cfg, measured["fuel_flow_kgps"], measured["rpm"])
+    p_prop = propeller_power_kw(
+        cfg, measured["rpm"], measured["p_amb_hPa"], measured["oat_K"],
+        cfg["propeller"]["assumed_tas_mps"],
+    )
+    p_pwr = max(p_ind, 1e-6)
+    rho5  = (p_ind - p_prop) / p_pwr
 
     # ── ρ₆–ρ₉ — per-cylinder thermal deviation (conditional mean) ────────
     # Each is the deviation of cylinder i from the cross-cylinder mean.

@@ -80,10 +80,14 @@ def main():
     # against sigma. This is scaling-invariant.
     from twin.measurement import MeasurementModel
     from parity.residuals import compute_residuals
-    fault_params = dict(nominal_test := {
+    nominal_test = {
         'cd_inj': [1.0]*cfg['geometry']['cylinders'], 'eta_v_scale': 1.0,
         'eta_c_scale': 1.0, 'hA_scale': 1.0, 'f_fric_scale': 1.0,
-    })
+    }
+
+    # rho1 vs a COMPRESSOR fault — this is its documented job (design PDF
+    # Eq. 11: rho1 = m_aSD - m_aC).
+    fault_params = dict(nominal_test)
     fault_params['eta_c_scale'] = 0.75  # 25% compressor fouling
     atm5k = isa(5000.0)
     plant_f, twin_f = MVEM(cfg), MVEM(cfg)
@@ -95,13 +99,39 @@ def main():
     predicted = mt.measure(twin_f.get_outputs(), add_noise=False)
     rho_fault = compute_residuals(measured, predicted, cfg, sigma_vec=None)
     snr1 = abs(rho_fault[0]) / max(sigma1, 1e-12)
-    snr5 = abs(rho_fault[4]) / max(sigma5, 1e-12)
+
+    # rho5 vs a FRICTION fault — its documented job, not the compressor's.
+    # Design PDF Eq. 14/§5.4, verbatim: "rho5 is the primary channel for
+    # friction-related degradation — bearing wear, lubrication breakdown —
+    # because those faults consume shaft power without altering the gas
+    # path." A compressor fault does the opposite: it changes the gas path
+    # and, at the new steady state the crank settles to, P_indicated and
+    # P_prop remain self-consistent by definition of equilibrium — so a
+    # genuine rho5 correctly stays quiet under it (measured 0.24 sigma on the
+    # same 25% compressor fault above). Testing rho5 against a compressor
+    # fault was inherited from when rho5 was `measured - predicted` brake
+    # power (plant vs twin of the same torque-balance identity), which picked
+    # up compressor faults only through the indirect boost -> fuel -> power
+    # chain — an artifact of the old degenerate formulation, not the design's
+    # intended isolation target. Same severity as Gate 5's own bearing test.
+    fault_fric = dict(nominal_test)
+    fault_fric['f_fric_scale'] = 1.6  # matches Gate 5's bearing severity
+    plant_b, twin_b = MVEM(cfg), MVEM(cfg)
+    mpb, mtb = MeasurementModel(seed=2), MeasurementModel(seed=998, is_twin=True)
+    for _ in range(150):
+        plant_b.step(1.0, fault_fric, atm5k, 72.0)
+        twin_b.step(1.0, nominal_test, atm5k, 72.0)
+    measured_b = mpb.measure(plant_b.get_outputs(), add_noise=False)
+    predicted_b = mtb.measure(twin_b.get_outputs(), add_noise=False)
+    rho_fric = compute_residuals(measured_b, predicted_b, cfg, sigma_vec=None)
+    snr5 = abs(rho_fric[4]) / max(sigma5, 1e-12)
 
     g4 = (snr1 >= 3.0) and (snr5 >= 3.0)
-    results.append(("4", "rho1, rho5 detect a real fault at >=3 sigma",
+    results.append(("4", "rho1 vs compressor fault, rho5 vs friction fault, both >=3 sigma",
                      f"sigma1={sigma1:.5f} sigma5={sigma5:.5f}  |  "
-                     f"25% compressor fault -> rho1 SNR={snr1:.2f} sigma, rho5 SNR={snr5:.2f} sigma",
-                     ">= 3 sigma detection on a real fault (scaling-invariant)", g4))
+                     f"25% compressor fault -> rho1 SNR={snr1:.2f} sigma  |  "
+                     f"60% friction increase -> rho5 SNR={snr5:.2f} sigma",
+                     ">= 3 sigma detection, each on its OWN documented fault type (scaling-invariant)", g4))
 
     print("Perturbing f_fric_scale to check rho10 responds...")
     nominal = {'cd_inj': [1.0]*cfg['geometry']['cylinders'], 'eta_v_scale': 1.0,

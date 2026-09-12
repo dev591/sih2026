@@ -180,3 +180,80 @@ def path2_compressor_map(cfg: dict, turbo_rpm: float, map_hPa: float,
     pi_c = (map_hPa * 100.0) / p01
     mdot_c, _ = compressor_ellipse(cfg, w_tc, pi_c, p01, max(oat_K, 1.0))
     return mdot_c
+
+
+# ---------------------------------------------------------------------------
+# ρ₅ — shaft power without a torque sensor: fuel path vs propeller dynamometer
+# ---------------------------------------------------------------------------
+# Same disease, same cure as ρ₁. `brake_power_kW` in mvem.py is computed from
+# torque balance — (T_ind - T_fric - T_pump) * w — which is the FUEL-side
+# estimate. `rho5 = measured["brake_power_kW"] - predicted["brake_power_kW"]`
+# therefore compared that one estimator on two models (plant vs twin), not two
+# estimators on one data stream. At steady state the crank's own equilibrium
+# (dw/dt = 0) makes T_ind - T_fric - T_pump equal T_load = P_prop/w BY
+# DEFINITION — so the plant's own reported "brake power" already secretly
+# equals the propeller-absorbed power, and comparing it to the twin's version
+# of the same identity carries no information about which of the two sides
+# disagrees.
+#
+# config/engine_vrde_180.yaml's propeller block says this outright: "This is
+# what makes rho5 (= P_indicated - P_prop) a genuine second, independent
+# estimate of shaft power instead of a made-up quadratic" — it names the two
+# paths but the residual was never built that way.
+#
+#   Path A  fuel flow, crank speed         -> indicated power via combustion
+#   Path B  crank speed, p_amb, OAT, TAS   -> propeller-absorbed power
+#
+# Both on NOMINAL constants (eta_i, friction coefficient), so a bearing-wear
+# fault (which raises the TRUE friction coefficient in the plant) shows up as
+# Path A overestimating power rather than being absorbed into the estimate.
+#
+# TAS is the one input both paths still share, and honestly so: there is no
+# airspeed sensor in this model (tas_mps is UNMODELLED — main.py's UNMODELLED
+# dict — and the plant's own P_prop uses the identical assumed constant, see
+# propeller.assumed_tas_mps in the profile). A true airspeed sensor is future
+# work; until then this is a real shared limitation, not a hidden one.
+
+def indicated_power_kw(cfg: dict, fuel_flow_kgps: float, rpm: float) -> float:
+    """
+    Sensors: fuel flow, crank speed. Model: nominal indicated efficiency and
+    nominal friction torque.
+
+    P_ind = eta_i * mdot_f * Q_LHV - T_fric(N) * w, mirroring mvem.py's
+    combustion and friction terms exactly, but with f_fric_scale PINNED AT
+    NOMINAL — the estimator must not know the plant's true wear state, or a
+    bearing fault would be absorbed rather than revealed.
+    """
+    eta_i = cfg.get("mvem", cfg).get("combustion", {}).get("eta_i_nominal", 0.50)
+    f_fric_nom = cfg.get("mvem", cfg)["crankshaft"].get("friction_coeff_nominal", 1.0)
+    q_lhv = cfg["fuel"]["Q_LHV_J_per_kg"]
+
+    w = rpm * 2.0 * math.pi / 60.0
+    p_ind_w = eta_i * fuel_flow_kgps * q_lhv
+    t_fric = 6.2 * f_fric_nom * w / 100.0   # same coefficient as mvem.py:266
+    p_fric_w = t_fric * w
+    return (p_ind_w - p_fric_w) / 1000.0
+
+
+def propeller_power_kw(cfg: dict, rpm: float, p_amb_hPa: float,
+                       oat_K: float, tas_mps: float) -> float:
+    """
+    Sensors: crank speed, ambient pressure, OAT — plus TAS, the one input
+    this path still shares with the plant's own load model (see module note:
+    there is no airspeed sensor in this system yet).
+
+    P_prop = Cp(J) * rho_air * n^3 * D^5, the same fixed-pitch propeller law
+    mvem.py uses for the load itself, evaluated here as an independent
+    ESTIMATE from measured shaft speed and measured ambient conditions.
+    """
+    prop = cfg["propeller"]
+    R, _, _ = _gas(cfg)
+
+    gear_ratio = prop.get("gear_ratio", 1.0)
+    n_prop_rps = max(rpm / gear_ratio, 1.0) / 60.0
+    j = tas_mps / max(n_prop_rps * prop["diameter_m"], 1e-6)
+    cp = prop["cp0"] * max(1.0 - (j / prop["j_max"]) ** 2, 0.0)
+
+    rho_air = (p_amb_hPa * 100.0) / (R * max(oat_K, 1.0))
+    p_prop_w = cp * rho_air * n_prop_rps ** 3 * prop["diameter_m"] ** 5
+    return p_prop_w / 1000.0
