@@ -39,7 +39,17 @@ export interface EngineProfile {
   developer: string;
   cycle: 'diesel' | 'spark_ignition';
   fuel: string;
+  /** Covers engine identity and the RATINGS block only — not geometry. */
   provenance: Provenance;
+  /**
+   * Geometry has its own marker because the two profiles genuinely differ:
+   * the Rotax figures are a published spec, the VRDE ones are sized to hit
+   * 180 hp because DRDO has never published displacement/bore/stroke. The
+   * YAML has carried this distinction per-block all along
+   * (`config/engine_vrde_180.yaml` → `geometry: provenance: assumed`); this
+   * field is what keeps the two in step, per the note at the top of the file.
+   */
+  geometryProvenance: Provenance;
 
   cylinders: number;
   displacement_m3: number;
@@ -95,6 +105,9 @@ export const VRDE_180: EngineProfile = {
   cycle: 'diesel',
   fuel: 'Jet A-1',
   provenance: 'published',
+  // Sized to hit 180 hp; DRDO publishes no displacement/bore/stroke. Mirrors
+  // `geometry: provenance: assumed` in config/engine_vrde_180.yaml.
+  geometryProvenance: 'assumed',
 
   cylinders: 4,
   displacement_m3: 2.0e-3,
@@ -102,9 +115,9 @@ export const VRDE_180: EngineProfile = {
   stroke_m: 0.086,
   gearRatio: 1.0,
 
-  ratedPower_kW: 134.2,
-  ratedPower_hp: 180,
-  criticalAltitude_ft: 11000,   // published
+  ratedPower_kW: 134.2,         // derived: 180 hp x 0.7457, not separately published
+  ratedPower_hp: 180,           // published
+  criticalAltitude_ft: 11000,   // published — "180 hp constant up to 11,000 ft"
   cruiseRpm: 3580,
   maxRpm: 3800,
 
@@ -155,6 +168,7 @@ export const ROTAX_914: EngineProfile = {
   cycle: 'spark_ignition',
   fuel: 'AVGAS 100LL',
   provenance: 'published',
+  geometryProvenance: 'published',   // real Rotax 914 spec, unlike the VRDE
 
   cylinders: 4,
   displacement_m3: 1.2114e-3,

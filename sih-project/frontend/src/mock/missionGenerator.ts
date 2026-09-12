@@ -203,6 +203,29 @@ export interface AltitudePlan {
  */
 export const ALT_RAMP_S = 20;
 
+/**
+ * UNMODELLED CHANNELS — must stay byte-identical to `UNMODELLED` in
+ * backend/main.py, or LIVE and SIMULATED disagree on the same field.
+ *
+ * PS component B names battery, alternator and injection timing, so the fields
+ * exist. Nothing models them at either end. They previously carried synthetic
+ * jitter here (`27.8 + noise(0.03)`) while the backend sent a bare constant —
+ * so the same channel wobbled in SIMULATED and froze in LIVE.
+ *
+ * The jitter is gone rather than copied to the backend: a number that moves
+ * without a cause asserts that something is being measured. Same reason parity
+ * path 4 returns null instead of reusing another path's estimate.
+ *
+ * `fuel_rail_bar` was 1.68 at both ends — three orders of magnitude low for a
+ * common rail (250-2000+ bar). Now a plausible constant, still not a measurement.
+ */
+const UNMODELLED = {
+  fuel_rail_bar: 900.0,
+  inj_timing_deg: 12.4,
+  bus_voltage_V: 27.8,
+  alternator_A: 14.2,
+} as const;
+
 /** Commanded altitude at t, smoothstepped so neither end of the ramp corners. */
 export function altitudeAt(
   t: number, eng: EngineProfile, plan?: AltitudePlan | null
@@ -438,14 +461,11 @@ function makeEngineB(
     oil_press_bar: phys.oil_press_bar + 0.03 + noise(0.02),
     oil_temp_C: phys.oil_temp_C - 0.8 + noise(0.3),
     fuel_flow_kgps: phys.fuel_flow_total + noise(2e-6),
-    fuel_rail_bar: 1.68 + noise(0.01),
     lambda: phys.lambda + noise(0.006),
     turbo_rpm: phys.turbo_rpm + noise(220),
     comp_out_p_hPa: phys.map_hPa * 1.045 + noise(2),
     comp_out_T_K: phys.iat_K + 54 + noise(0.5),
-    inj_timing_deg: 12.4 + noise(0.05),
-    bus_voltage_V: 27.8 + noise(0.03),
-    alternator_A: 14.2 + noise(0.1),
+    ...UNMODELLED,
     throttle_pct: CRUISE.throttle_pct,
     vib_rms_g: phys.egt_C.map(() => 0.42 + noise(0.01)),
     altitude_ft: CRUISE.altitude_ft,
@@ -494,14 +514,11 @@ function makeTick(
     oil_press_bar: phys.oil_press_bar + noise(0.02),
     oil_temp_C: phys.oil_temp_C + noise(0.3),
     fuel_flow_kgps: phys.fuel_flow_total + noise(2e-6),
-    fuel_rail_bar: 1.68 + noise(0.01),
     lambda: lambda_meas,
     turbo_rpm: phys.turbo_rpm + noise(220),
     comp_out_p_hPa: phys.map_hPa * 1.045 + noise(2),
     comp_out_T_K: phys.iat_K + 54 + noise(0.5),
-    inj_timing_deg: 12.4 + noise(0.05),
-    bus_voltage_V: 27.8 + noise(0.03),
-    alternator_A: 14.2 + noise(0.1),
+    ...UNMODELLED,
     throttle_pct: CRUISE.throttle_pct,
     vib_rms_g: phys.egt_C.map((_, i) =>
       0.42 + (i === (cfg.injector?.cyl ?? FOULED_CYL) ? phys.ripple * 0.35 : 0) + noise(0.01)

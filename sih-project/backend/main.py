@@ -87,6 +87,38 @@ _OIL_T_LIMIT = cfg["limits"]["oil_temp_C"]
 ALT_RAMP_S = 20.0
 
 
+# ---------------------------------------------------------------------------
+# UNMODELLED CHANNELS — placeholders, NOT telemetry
+# ---------------------------------------------------------------------------
+# PS component B names battery, alternator and injection timing explicitly, so
+# these fields have to exist in the frame. Nothing in the MVEM computes them:
+# there is no electrical model, no injection-timing schedule, no vibration
+# model and no airframe performance model. They are CONSTANTS.
+#
+# They are deliberately NOT given synthetic jitter. A number that wobbles
+# without a cause is worse than one that sits still, because the wobble is a
+# claim that something is being measured — the same reason parity path 4
+# returns None instead of reusing another path's estimate, and the reason
+# ml/eval/metrics.md prefers a blank to an undefendable figure. A frozen digit
+# is at least honestly frozen, and a presenter can say "not modelled yet".
+#
+# Modelling these for real is Phase 4 of docs/plan (rail pressure becomes the
+# diesel load input; the electrical bus gets an alternator driven off crank
+# speed). Until then, do not present them as live instrumentation.
+#
+# fuel_rail_bar was 1.68 — off by roughly three orders of magnitude for a
+# common-rail diesel, which runs 250-2000+ bar. Corrected to a cruise-plausible
+# value so it is not visibly absurd to anyone who knows diesels, but it is
+# still a constant, not a measurement.
+UNMODELLED = {
+    "fuel_rail_bar":  900.0,   # provenance: assumed — plausible cruise rail pressure
+    "inj_timing_deg": 12.4,    # provenance: assumed — real FADECs schedule this on (N, load)
+    "bus_voltage_V":  27.8,    # provenance: assumed — nominal 28 V DC bus
+    "alternator_A":   14.2,    # provenance: assumed
+    "tas_mps":        61.2,    # provenance: assumed — no airframe model
+}
+
+
 def _altitude_ft(t: float, conn: dict | None = None) -> float:
     """
     Commanded altitude if the GCS has asked for one, otherwise the scenario's
@@ -425,19 +457,15 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "oil_press_bar":  measuredA["oil_press_bar"],
                     "oil_temp_C":     measuredA["oil_temp_C"],
                     "fuel_flow_kgps": measuredA["fuel_flow_kgps"],
-                    "fuel_rail_bar":  1.68,
                     "lambda":         measuredA["lambda_val"],
                     "turbo_rpm":      measuredA["turbo_rpm"],
                     "comp_out_p_hPa": measuredA["map_hPa"] * 1.05,
                     "comp_out_T_K":   measuredA["iat_K"],
-                    "inj_timing_deg": 12.4,
-                    "bus_voltage_V":  27.8,
-                    "alternator_A":   14.2,
                     "throttle_pct":   float(throttle_pct),
-                    "vib_rms_g":      [0.42] * N_CYL,
+                    "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
-                    "tas_mps":        61.2,
                     "oat_K":          atm["T"],
+                    **UNMODELLED,
                 }
 
                 # predicted — only the 5 fields StripChart uses for the twin
@@ -464,19 +492,15 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "oil_press_bar":  measuredB["oil_press_bar"],
                     "oil_temp_C":     measuredB["oil_temp_C"],
                     "fuel_flow_kgps": measuredB["fuel_flow_kgps"],
-                    "fuel_rail_bar":  1.68,
                     "lambda":         measuredB["lambda_val"],
                     "turbo_rpm":      measuredB["turbo_rpm"],
                     "comp_out_p_hPa": measuredB["map_hPa"] * 1.05,
                     "comp_out_T_K":   measuredB["iat_K"],
-                    "inj_timing_deg": 12.4,
-                    "bus_voltage_V":  27.8,
-                    "alternator_A":   14.2,
                     "throttle_pct":   float(throttle_pct),
-                    "vib_rms_g":      [0.42] * N_CYL,
+                    "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
-                    "tas_mps":        61.2,
                     "oat_K":          atm["T"],   # CrossEngine reads slowB.oat_K
+                    **UNMODELLED,
                 }
 
                 # fast — vibration features
