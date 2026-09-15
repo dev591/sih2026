@@ -75,7 +75,62 @@ validation_anchors:
     altitude_ft: 17664
     note: "DRDO: tested and validated for high-altitude performance at Leh and Changla."
     published_power_hp: null      # not published; do not infer one
+  # -------------------------------------------------------------------------
+  # VRDE's OWN programme requirement — 2015 Expression of Interest for joint
+  # development of a 200 hp aero-diesel (VRDE Ahmednagar). A REQUIREMENT, not
+  # a measurement, and for a 200 hp programme whereas the delivered product is
+  # rated 180 hp. So it is used two ways, never conflated:
+  #   - absolute bands: reported, labelled "200 hp programme requirement";
+  #   - LAPSE bands (power / sea-level power): the primary altitude-form check,
+  #     because the altitude-response a DRDO lab specified carries over to the
+  #     180 hp product even though the absolute rating changed.
+  # Full citation trail: docs/research/VRDE-PUBLIC-DOSSIER.md §1.1.
+  # -------------------------------------------------------------------------
+  vrde_eoi_2015:
+    provenance: published
+    kind: requirement
+    source: "VRDE Ahmednagar EOI (2015), 200 hp aero-diesel joint development"
+    url: "http://indias-defence.blogspot.com/2015/05/vrde-developing-aero-diesel-engine-for.html"
+    power_bands_hp:
+      - {altitude_ft: 0,     min: 195.0, max: 205.0}
+      - {altitude_ft: 10000, min: 195.0, max: 205.0}
+      - {altitude_ft: 20000, min: 145.0, max: 155.0}
+      - {altitude_ft: 30000, min: 105.0, max: 115.0}
+    sfc_g_per_kWh_msl: 210.0
+    installed_weight_kg: 250.0
+    note: "Requirement for a 200 hp programme; compare LAPSE, not absolute hp, against the 180 hp product."
+
+  # -------------------------------------------------------------------------
+  # The engine the VRDE unit replaces on TAPAS: Austro E4P (AE330). Same class
+  # (automotive-derived 2 L common-rail turbo-diesel, liquid-cooled, integrated
+  # gearbox, dual-channel EECU). Type-certificated, so its numbers are primary
+  # sources — for a DIFFERENT engine. Model-form and limit reference only.
+  # Dossier §3.
+  # -------------------------------------------------------------------------
+  comparable_engine_austro_e4p:
+    provenance: published_comparable_engine
+    name: "Austro Engine E4P (AE330)"
+    source: "EASA TCDS E.200 Issue 12 (2020); Austro E4 Series factsheet 05/2024"
+    url: "https://www.easa.europa.eu/en/downloads/7617/en"
+    displacement_cm3: 1991
+    gearbox_ratio: 1.69
+    takeoff_power_kW: 132.0
+    takeoff_crank_rpm: 3880
+    takeoff_prop_rpm: 2300
+    max_continuous_power_kW: 126.0
+    max_continuous_crank_rpm: 3720
+    fuel_flow_L_per_h:
+      - {power_frac: 1.00, L_per_h: 39.0}
+      - {power_frac: 0.60, L_per_h: 21.0}
+    # Same value as config/sensors.yaml fuel_flow_kgps.fuel_density_kg_per_l
+    # (published, 15 degC) so the project carries one fuel density, not two.
+    # Used only to convert the published L/h to kg/h.
+    fuel_density_kg_per_L: 0.82
+    fuel_density_provenance: published
+    note: "Never present these as VRDE measurements."
+
   comparable_engine_surrogate:
+    # SECONDARY comparable (superseded as the altitude target by vrde_eoi_2015).
     # This is NOT VRDE data.  It is a public, close-architecture benchmark for
     # checking whether the model's altitude lapse and fuel economy are of the
     # right order before VRDE dynamometer data becomes available.

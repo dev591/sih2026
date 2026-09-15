@@ -43,7 +43,9 @@ git stash pop
 |---|---|
 | `demo-safe-2026-09-12` | **Tag. Use this for any demo.** All of 2026-09-12's bug fixes plus the readable strip charts. |
 | `hpc-ncmapss-realdata` | The branch that tag points into. Also safe. |
-| `engine-fidelity` | Work in progress. Assume broken unless just verified. |
+| `engine-fidelity` | Sensor/parity/combustion fidelity work, plus the 2026-09-15 live-inference fixes (`bad0e12`). Verified green at `f6d69d1`, but ML weights are stale — not a demo ref. |
+| `pre-drdo-fidelity` | Tag at `f6d69d1`, the starting point of the DRDO-fidelity programme. Rollback point if that work goes wrong. |
+| `drdo-fidelity` | The DRDO-grade twin programme (gearbox, governor, liquid cooling, rail, sensors, calibration, retrain). **Mid-surgery for weeks — never demo from it.** To stash and switch, use the same procedure as above with `git switch drdo-fidelity` to resume. |
 | `main` | ⚠️ **49 commits behind — doc-only scaffold era. NOT a demo fallback.** |
 
 That last row is the trap: `main` looks like the obvious safe choice and is the one branch that
