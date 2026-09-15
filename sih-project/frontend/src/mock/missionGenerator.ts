@@ -472,6 +472,9 @@ function makeEngineB(
     tas_mps: CRUISE.tas_mps,
     oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg)).T,
     p_amb_hPa: isa(CRUISE.altitude_ft).p / 100,
+    prop_rpm: CRUISE.rpm / eng.gearRatio + noise(1),
+    blade_angle_deg: eng.cruiseBladeAngle_deg == null ? null : eng.cruiseBladeAngle_deg + noise(0.05),
+    gearbox_oil_C: eng.nominalGearboxOil_C == null ? null : eng.nominalGearboxOil_C + noise(0.2),
   };
 }
 
@@ -528,6 +531,9 @@ function makeTick(
     tas_mps: CRUISE.tas_mps,
     oat_K: isa(CRUISE.altitude_ft, commonModeOffsetK(t, cfg)).T,
     p_amb_hPa: isa(CRUISE.altitude_ft).p / 100,
+    prop_rpm: CRUISE.rpm / eng.gearRatio + noise(1),
+    blade_angle_deg: eng.cruiseBladeAngle_deg == null ? null : eng.cruiseBladeAngle_deg + noise(0.05),
+    gearbox_oil_C: eng.nominalGearboxOil_C == null ? null : eng.nominalGearboxOil_C + noise(0.2),
   };
 
   const fast: FastFeatures = {

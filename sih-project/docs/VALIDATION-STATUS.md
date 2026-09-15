@@ -1,6 +1,7 @@
 # Validation status — public evidence only
 
-Last updated: 2026-09-12
+Last updated: 2026-09-15 (see the section at the end for the drivetrain update;
+the tables directly below are the 2026-09-12 baseline, kept for comparison)
 
 ## What is directly validated for the target engine
 
@@ -100,3 +101,41 @@ doesn't reopen them under time pressure:
 Net effect: all three verification suites remain green (`test_sensors.py`
 11/11, `verify.py` all passed, `gates_check.py` 6/6) and nothing in this
 session's scope review changed a single line of physics or gate logic.
+
+## 2026-09-15 — geometry, gearbox, constant-speed propeller (`drdo-fidelity`)
+
+Sources for every new number: `docs/research/VRDE-PUBLIC-DOSSIER.md`. New
+anchors added to `validate_vrde.py`: VRDE's own 2015 EOI power-lapse
+requirement (compared as lapse — it was a 200 hp programme) and the Austro
+E4P/AE330 type certificate (a comparable engine, never quoted as VRDE data).
+
+| Anchor | 2026-09-12 | 2026-09-15 |
+|---|---:|---:|
+| DRDO 180 hp, sea level | −13.2 % | **−7.7 %** |
+| DRDO 180 hp, 11,000 ft | −20.1 % | **−12.5 %** |
+| EOI lapse, 10,000 ft | −0.3 % outside | inside |
+| EOI lapse, 20,000 ft | −1.0 % outside | inside |
+| EOI lapse, 30,000 ft | −2.6 % outside | −1.6 % outside |
+| Sea-level BSFC vs EOI 210 g/kWh | 178 (−15.1 %) | 181 (−13.7 %) |
+| Propeller helical tip Mach | ~0.96 at SL (supersonic tip speed 328 m/s) | 0.68 SL / 0.69 cruise / 0.79 at 32,000 ft |
+
+What changed and why: 2179 cc (mHawk base, unverified community source);
+1.69 reduction gearbox and 3880/2300 rpm (AE330 comparable); constant-speed
+propeller with a PI governor (VRDE's spec lists a governor); airspeed, prop
+speed, blade angle and gearbox oil became sensed channels; the wastegate gained
+integral action (P-only sat 33–48 mbar above its own target everywhere).
+
+**Still open, stated plainly:**
+- Power is still 8–13 % low against DRDO's 180 hp and BSFC is ~14 % too good,
+  consistent with an over-efficient, air-starved model (η_i = 0.50, no
+  intercooler). Phase 3 (intercooler, liquid cooling) and Phase 6 (calibration)
+  address it; no constant was tuned to close it here.
+- **ρ₅ is weaker on a constant-speed propeller.** Its propeller-dynamometer
+  path depends on blade angle (−5.7 % of ρ₅ per 0.3°) and airspeed (+4.3 % per
+  m/s). With commissioning calibration of both, a 60 % friction fault is
+  1.46σ per sample and **3.03σ on the 32-sample detector window — marginal**.
+  ρ₁₀ (oil pressure) is now the primary friction channel; ρ₅ corroborates.
+- Rotax 914 transfer validation is bit-identical to 2026-09-12.
+
+Suites: `test_sensors.py` 12/12, `verify.py` 5/5 (new drivetrain test),
+`gates_check.py` 6/6, sigma regenerated, live websocket frame healthy.

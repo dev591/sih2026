@@ -91,6 +91,10 @@ export interface EngineProfile {
 
   cruiseAltitude_ft: number;
   cruiseTas_mps: number;
+  /** Healthy-cruise blade angle; absent on a fixed-pitch propeller. */
+  cruiseBladeAngle_deg?: number;
+  /** Healthy-cruise gearbox oil temperature; absent without a gearbox oil node. */
+  nominalGearboxOil_C?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,21 +109,22 @@ export const VRDE_180: EngineProfile = {
   cycle: 'diesel',
   fuel: 'Jet A-1',
   provenance: 'published',
-  // Sized to hit 180 hp; DRDO publishes no displacement/bore/stroke. Mirrors
-  // `geometry: provenance: assumed` in config/engine_vrde_180.yaml.
+  // 2179 cc is the mHawk 2.2 base block — a community claim, not DRDO data;
+  // bore/stroke are assumed. Mirrors `geometry: provenance: unverified_community`
+  // in config/engine_vrde_180.yaml. See docs/research/VRDE-PUBLIC-DOSSIER.md.
   geometryProvenance: 'assumed',
 
   cylinders: 4,
-  displacement_m3: 2.0e-3,
-  bore_m: 0.086,
-  stroke_m: 0.086,
-  gearRatio: 1.0,
+  displacement_m3: 2.179e-3,
+  bore_m: 0.085,
+  stroke_m: 0.096,
+  gearRatio: 1.69,              // AE330-class reduction gearbox (comparable engine)
 
   ratedPower_kW: 134.2,         // derived: 180 hp x 0.7457, not separately published
   ratedPower_hp: 180,           // published
   criticalAltitude_ft: 11000,   // published — "180 hp constant up to 11,000 ft"
-  cruiseRpm: 3580,
-  maxRpm: 3800,
+  cruiseRpm: 3588,              // governor schedule at 72 % (2123 prop rpm) x 1.69
+  maxRpm: 3880,                 // AE330-class take-off crank speed (comparable engine)
 
   Q_LHV: 43.0e6,
   AFR_stoich: 14.5,
@@ -136,7 +141,12 @@ export const VRDE_180: EngineProfile = {
     { key: 'oilp', label: 'Oil pressure', unit: 'bar',  limit: 2.0,  inverted: true, decimals: 2, provenance: 'assumed' },
     { key: 'oilt', label: 'Oil temp',     unit: '°C',   limit: 130,  provenance: 'assumed' },
     { key: 'map',  label: 'MAP',          unit: 'hPa',  limit: 1900, provenance: 'assumed' },
-    { key: 'rpm',  label: 'RPM',          unit: 'rpm',  limit: 3800, provenance: 'assumed' },
+    // Crank speed and gearbox oil: EASA TCDS E.200 values for the AE330 this
+    // engine replaces — a comparable engine, not VRDE data (the YAML marks
+    // them published_comparable_engine; this union has no such tier, so they
+    // stay labelled assumed on screen).
+    { key: 'rpm',  label: 'RPM (max continuous)', unit: 'rpm', limit: 3720, provenance: 'assumed' },
+    { key: 'gbox', label: 'Gearbox oil',  unit: '°C',   limit: 120,  provenance: 'assumed' },
     // NOTE: no EGT row. EGT is a TREND parameter on this class, not a limit
     // parameter — which is precisely the information a twin exists to exploit.
   ],
@@ -153,6 +163,8 @@ export const VRDE_180: EngineProfile = {
 
   cruiseAltitude_ft: 18000,
   cruiseTas_mps: 61.2,
+  cruiseBladeAngle_deg: 26.2,   // backend verify.py, 18,000 ft / 72 % steady state
+  nominalGearboxOil_C: 99.4,    // same run
 };
 
 // ---------------------------------------------------------------------------

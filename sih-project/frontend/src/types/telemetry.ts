@@ -49,6 +49,14 @@ export interface SlowFrame {
    *  closed from manifold-side channels alone. A genuinely separate
    *  transducer from map_hPa, which is what keeps rho1 independent. */
   p_amb_hPa: number;
+  /** Drivetrain and air data — sensed channels added with the reduction
+   *  gearbox and constant-speed propeller (config/sensors.yaml). tas_mps
+   *  above is the air-data reading now, not a constant. */
+  prop_rpm: number;
+  /** Blade angle from pitch-actuator feedback; null on a fixed-pitch profile. */
+  blade_angle_deg: number | null;
+  /** Gearbox oil temperature; null on a profile with no gearbox oil node. */
+  gearbox_oil_C: number | null;
 }
 
 // ---------------------------------------------------------------------------

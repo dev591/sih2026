@@ -65,8 +65,14 @@ skip.
   "vib_rms_g": [0.42, 0.44, 0.61, 0.43],   // per-cyl-region RMS, FEATURE  [UNMODELLED]
 
   "altitude_ft": 18000.0,       // from the flight sim / mission profile
-  "tas_mps": 61.2,              // true airspeed, for propeller J   [UNMODELLED]
-  "oat_K": 251.6                // outside air temperature
+  "tas_mps": 61.2,              // true airspeed, air-data channel (pitot-static), for propeller J
+  "oat_K": 251.6,               // outside air temperature
+  "p_amb_hPa": 506.0,           // ambient (compressor inlet) pressure — parity Path 2
+
+  // Drivetrain — added with the 1.69 reduction gearbox and constant-speed propeller
+  "prop_rpm": 2123.3,           // separate prop-flange pickup, NOT rpm / gear ratio
+  "blade_angle_deg": 26.2,      // pitch-actuator feedback; null on a fixed-pitch profile
+  "gearbox_oil_C": 99.4         // null on a profile with no gearbox oil node
 }
 ```
 
@@ -76,9 +82,11 @@ statement text.** Do not drop them.
 
 ### `[UNMODELLED]` — what that marker means
 
-Six fields are **constants**, not measurements: nothing in the MVEM computes
-them. There is no electrical model, no injection-timing schedule, no vibration
-model and no airframe performance model. They are present because the problem
+Five fields are **constants**, not measurements: nothing in the MVEM computes
+them. There is no electrical model, no injection-timing schedule and no
+vibration model. (`tas_mps` left this list on 2026-09-15: it is a scenario
+input sensed through an air-data channel, because parity Path B of ρ₅ on a
+constant-speed propeller cannot be closed without a real airspeed.) They are present because the problem
 statement names them and the schema is frozen; they are flagged here so nobody
 presents a frozen digit as live instrumentation.
 

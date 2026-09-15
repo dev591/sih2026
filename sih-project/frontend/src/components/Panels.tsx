@@ -398,6 +398,7 @@ export function LimitsPanel() {
     oilt: slow.oil_temp_C,
     map: slow.map_hPa,
     rpm: slow.rpm,
+    gbox: slow.gearbox_oil_C ?? 0,
   };
   const rows = engine.limits.map((l) => ({
     label: l.label,
