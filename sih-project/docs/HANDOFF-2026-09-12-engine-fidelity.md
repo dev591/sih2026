@@ -167,6 +167,27 @@ that now actually determine them — flagged by the code's own comment since
 the very first commit touching that file, never executed (needs `cfg`
 threaded through ~7 call sites across 3 files).
 
+## Update 2026-09-12 (later same day) — Phase 5 scope closed for competition
+
+Ran the Rotax calibration + wrote `validate_rotax.py`/`validate_vrde.py` (see
+`f4ecfde`), then reviewed what remained against real competition risk with the
+user, day-of. Decisions, see `VALIDATION-STATUS.md`'s "Scope decisions for
+competition day" section for the full reasoning:
+
+- Gate 6 **stays** the shape check — NOT converted to a strict DRDO-anchor
+  pass/fail, because the twin is honestly 13-20% low against that anchor and
+  there is no public VRDE dyno data to close the gap with justified physics
+  before judging. The gap is documented, not hidden, in the anchor table.
+- Rotax cross-engine validation is **frozen as committed**, kept as supporting
+  evidence, not extended (no source manual PDF in-repo to digitize full
+  curves from; not the target engine).
+- Real digitized VRDE compressor map: **not pursued**, no public map/part
+  number exists for VRDE's own turbocharger. Surrogate stays `assumed`.
+
+All three verification suites confirmed green after this review with zero
+code changes: `test_sensors.py` 11/11, `verify.py` all passed, `gates_check.py`
+6/6.
+
 ## What's NOT done — Phase 5, entirely
 
 This is the professor's third point ("calibration and validation matters

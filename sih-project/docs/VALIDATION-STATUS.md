@@ -67,3 +67,36 @@ online, so fault departures remain observable.
 For the presentation, say: *“We use DRDO's published VRDE anchors as target
 evidence. Where detailed VRDE data is unavailable, a clearly labelled public
 comparable engine checks model form—not the target-engine calibration.”*
+
+## Scope decisions for competition day (2026-09-12)
+
+Deliberate, low-risk calls made this session — recorded so the next person
+doesn't reopen them under time pressure:
+
+- **Gate 6 stays a shape check** (`gates_check.py`, "flat then falls"), not a
+  strict comparison against the DRDO 180 hp anchor. The twin is honestly
+  13-20% low against that anchor (table above) because no real VRDE dyno
+  trace, test uncertainty band, or ambient conditions are public — turning
+  Gate 6 into a strict pass/fail against that anchor would fail the gate for
+  a reason unfixable without data DRDO hasn't published, days before a
+  competition. The gap itself is not hidden: it's the table above, and is the
+  correct honest answer if a judge asks "does it match the real engine
+  exactly."
+- **Rotax cross-engine validation is kept exactly as committed and is not
+  being extended.** It is genuine supporting evidence (same MVEM/measurement/
+  parity code, no engine-specific branch, +1.4%/-2.2% agreement against a
+  real published rating) but is not the target engine, so no further effort
+  went into digitizing its full power/torque/BSFC curves this session — there
+  is no source PDF in this repo to digitize from, and finding a scanned
+  original online was not pursued further once the target-engine (VRDE) work
+  was prioritized as lower-risk to finish first.
+- **A real digitized VRDE-specific compressor map was not pursued.** No
+  public turbocharger part number or map is attached to VRDE's own
+  publications; `config/compressor_map.csv` remains the existing
+  analytical Ellipse-model surrogate, already labelled `provenance: assumed`
+  per `ENGINEERING-STANDARDS.md` §1. Do not silently upgrade its label without
+  an actual sourced map.
+
+Net effect: all three verification suites remain green (`test_sensors.py`
+11/11, `verify.py` all passed, `gates_check.py` 6/6) and nothing in this
+session's scope review changed a single line of physics or gate logic.
