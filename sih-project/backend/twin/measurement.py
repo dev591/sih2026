@@ -275,7 +275,7 @@ class MeasurementModel:
         self._offset: dict[str, float | list[float]] = {}
         if not is_twin:
             for name, spec in _CH.items():
-                tol = spec.get("tolerance_degC")
+                tol = spec.get("tolerance_degC", spec.get("tolerance_abs"))
                 if tol is None:
                     # For pressures, use the ZERO-OFFSET fraction, not the total
                     # accuracy band. `accuracy_frac_fs` combines offset, span,
@@ -294,6 +294,20 @@ class MeasurementModel:
                     ]
                 else:
                     self._offset[name] = self.rng.uniform(-tol, tol)
+
+            # COMMISSIONING CALIBRATION. For channels whose spec declares one,
+            # the fixed offset is measured once against a reference instrument
+            # and subtracted. The estimate is the true offset PLUS that
+            # reference's own error, so what remains is the reference's error —
+            # never zero. Drawn from a separate RNG so every other probe's
+            # offset stays bit-identical for the same seed.
+            cal_rng = random.Random((seed * 7919) ^ 0xCA11B)
+            for name, spec in _CH.items():
+                cal = spec.get("commissioning_calibration")
+                if cal and name in self._offset and not isinstance(self._offset[name], list):
+                    r = float(cal["residual_error_abs"])
+                    estimate = self._offset[name] + cal_rng.uniform(-r, r)
+                    self._offset[name] -= estimate
 
     # -- helpers ------------------------------------------------------------
     def noise(self, sigma: float) -> float:
@@ -480,7 +494,7 @@ class MeasurementModel:
         ff = vol_q * rho_fuel
         ff = self._apply_lag("fuel_flow_kgps", ff, dt) + self._n("fuel_flow_kgps", add_noise)
 
-        return {
+        out = {
             "rpm": float(rpm_out),
             "map_hPa": float(map_v),
             "iat_K": float(iat_K),
@@ -512,3 +526,34 @@ class MeasurementModel:
                 + (self.noise(max(phys["brake_power_kW"] * 0.01, 0.05)) if add_noise else 0.0)
             ),
         }
+
+        # ---- air data and drivetrain ----
+        # Evaluated AFTER every pre-existing channel so their noise draws keep
+        # the same order for a given seed.
+        tas = self._apply_lag("tas_mps", phys["tas_mps"], dt) \
+            + float(self._offset.get("tas_mps", 0.0)) + self._n("tas_mps", add_noise)
+        prop_rpm = phys["prop_rpm"] + self._n("prop_rpm", add_noise)
+
+        if phys["blade_angle_deg"] is None:
+            beta = None          # fixed-pitch propeller: there is no pitch to sense
+        else:
+            beta = self._apply_lag("blade_angle_deg", phys["blade_angle_deg"], dt) \
+                + float(self._offset.get("blade_angle_deg", 0.0)) \
+                + self._n("blade_angle_deg", add_noise)
+
+        if phys["gearbox_oil_C"] is None:
+            gb_oil = None        # no gearbox oil node on this profile
+        else:
+            r_gb = ntc_resistance_ohm(phys["gearbox_oil_C"])
+            gb_oil = ntc_temp_C(quantise(r_gb, 50.0, 40000.0))
+            gb_oil = self._apply_lag("gearbox_oil_C", gb_oil, dt) \
+                + float(self._offset.get("gearbox_oil_C", 0.0)) \
+                + self._n("gearbox_oil_C", add_noise)
+
+        out.update({
+            "tas_mps": float(tas),
+            "prop_rpm": float(prop_rpm),
+            "blade_angle_deg": (float(beta) if beta is not None else None),
+            "gearbox_oil_C": (float(gb_oil) if gb_oil is not None else None),
+        })
+        return out

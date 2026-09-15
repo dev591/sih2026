@@ -76,6 +76,7 @@ _MAP_LIMIT   = cfg["limits"]["manifold_pressure_hPa"]["max_continuous"]
 _RPM_LIMIT   = cfg["ratings"]["max_continuous_rpm"]
 _OIL_P_MIN   = cfg["limits"]["oil_pressure_bar"]["min_above_2500rpm"]
 _OIL_T_LIMIT = cfg["limits"]["oil_temp_C"]
+_GB_OIL_LIMIT = cfg["limits"]["gearbox_oil_C"]
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +117,25 @@ UNMODELLED = {
     "inj_timing_deg": 12.4,    # provenance: assumed — real FADECs schedule this on (N, load)
     "bus_voltage_V":  27.8,    # provenance: assumed — nominal 28 V DC bus
     "alternator_A":   14.2,    # provenance: assumed
-    "tas_mps":        61.2,    # provenance: assumed — no airframe model
 }
+# tas_mps left this dict: it is now a scenario input sensed through the air-data
+# channel (config/sensors.yaml tas_mps), because parity Path B of rho5 on a
+# constant-speed propeller cannot be closed without a real airspeed.
+
+
+# Scenario true airspeed. There is still no airframe performance model, so TAS
+# is a SCENARIO INPUT like altitude and throttle. provenance: assumed — a slower
+# climb speed blending into the long-standing 61.2 m/s cruise figure over the
+# last 30 s of the climb.
+CLIMB_TAS_MPS, CRUISE_TAS_MPS = 48.0, 61.2
+_CLIMB_S, _TAS_BLEND_S = 480.0, 30.0
+
+
+def _tas_mps(t: float, conn: dict | None = None) -> float:
+    if (conn or {}).get("alt_cmd"):
+        return CRUISE_TAS_MPS
+    u = min(1.0, max(0.0, (t - (_CLIMB_S - _TAS_BLEND_S)) / _TAS_BLEND_S))
+    return CLIMB_TAS_MPS + (CRUISE_TAS_MPS - CLIMB_TAS_MPS) * (u * u * (3.0 - 2.0 * u))
 
 
 def _altitude_ft(t: float, conn: dict | None = None) -> float:
@@ -130,7 +148,7 @@ def _altitude_ft(t: float, conn: dict | None = None) -> float:
         u = min(1.0, max(0.0, (t - cmd["startT"]) / ALT_RAMP_S))
         return cmd["from_ft"] + (cmd["to_ft"] - cmd["from_ft"]) * (u * u * (3.0 - 2.0 * u))
 
-    lo, hi, climb_s = 5000.0, 18000.0, 480.0
+    lo, hi, climb_s = 5000.0, 18000.0, _CLIMB_S
     if t <= 0.0:   return lo
     if t >= climb_s: return hi
     return lo + (hi - lo) * (t / climb_s)
@@ -158,6 +176,9 @@ def _limits_state(slow_vals: dict) -> str:
     if slow_vals["oil_press_bar"] < _OIL_P_MIN and slow_vals["rpm"] > 2500:
         return "caution"
     if slow_vals["oil_temp_C"] > _OIL_T_LIMIT:
+        return "exceeded"
+    gb_oil = slow_vals.get("gearbox_oil_C")
+    if gb_oil is not None and gb_oil > _GB_OIL_LIMIT:
         return "exceeded"
     return "green"
 
@@ -408,6 +429,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 t            = time.time() - start_time
                 altitude_ft  = _altitude_ft(t, conn)
                 throttle_pct = _throttle_pct(t)
+                tas_mps      = _tas_mps(t, conn)
 
                 # Build nominal params and apply fault configuration
                 nominal_params = {
@@ -435,9 +457,9 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 atm = isa(altitude_ft, isa_offset_K=isa_k)
 
                 # ── Physics ───────────────────────────────────────────────
-                plantA.step(1.0, plantA_params, atm, throttle_pct)
-                twinA.step( 1.0, nominal_params, atm, throttle_pct)
-                plantB.step(1.0, nominal_params, atm, throttle_pct)
+                plantA.step(1.0, plantA_params, atm, throttle_pct, tas_mps)
+                twinA.step( 1.0, nominal_params, atm, throttle_pct, tas_mps)
+                plantB.step(1.0, nominal_params, atm, throttle_pct, tas_mps)
 
                 # ── Measurement ───────────────────────────────────────────
                 out_plantA = plantA.get_outputs()
@@ -480,6 +502,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "rpm":           measuredA["rpm"],
                     "oil_press_bar": measuredA["oil_press_bar"],
                     "oil_temp_C":    measuredA["oil_temp_C"],
+                    "gearbox_oil_C": measuredA["gearbox_oil_C"],
                 }
                 lim_state = _limits_state(limits_vals)
 
@@ -522,6 +545,11 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "altitude_ft":    float(altitude_ft),
                     "oat_K":          measuredA["oat_K"],
                     "p_amb_hPa":      measuredA["p_amb_hPa"],
+                    # Drivetrain and air data — sensed, see config/sensors.yaml.
+                    "tas_mps":         measuredA["tas_mps"],
+                    "prop_rpm":        measuredA["prop_rpm"],
+                    "blade_angle_deg": measuredA["blade_angle_deg"],
+                    "gearbox_oil_C":   measuredA["gearbox_oil_C"],
                     **UNMODELLED,
                 }
 
@@ -565,6 +593,11 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "altitude_ft":    float(altitude_ft),
                     "oat_K":          measuredB["oat_K"],   # CrossEngine reads slowB.oat_K
                     "p_amb_hPa":      measuredB["p_amb_hPa"],
+                    # Drivetrain and air data — sensed, see config/sensors.yaml.
+                    "tas_mps":         measuredB["tas_mps"],
+                    "prop_rpm":        measuredB["prop_rpm"],
+                    "blade_angle_deg": measuredB["blade_angle_deg"],
+                    "gearbox_oil_C":   measuredB["gearbox_oil_C"],
                     **UNMODELLED,
                 }
 

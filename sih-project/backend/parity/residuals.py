@@ -110,11 +110,22 @@ def compute_residuals(
     # against the design's own "within a few percent" criterion (a plant/twin
     # gap on identical nominal params is zero by construction — same disease
     # rho1 and rho5 had).
+    # Propeller-side inputs. A constant-speed profile senses TAS (air data),
+    # prop speed and blade angle; the fixed-pitch Rotax transfer profile keeps
+    # its commissioned configuration (assumed TAS, crank speed / gear ratio) so
+    # its committed healthy baseline stays valid.
+    constant_speed = cfg["propeller"].get("type") == "constant_speed"
+    tas_in   = measured["tas_mps"] if constant_speed else cfg["propeller"]["assumed_tas_mps"]
+    beta_in  = measured["blade_angle_deg"] if constant_speed else None
+    nprop_in = measured["prop_rpm"] if constant_speed else None
+    eta_gb   = cfg.get("mvem", {}).get("gearbox", {}).get("efficiency", 1.0)
+
     imbalance_kw = energy_closure_kw(
         cfg, measured["fuel_flow_kgps"], measured["rpm"],
         measured["map_hPa"], measured["iat_K"],
         measured["egt_C"], measured["cht_C"],
         measured["p_amb_hPa"], measured["oat_K"],
+        tas_in, beta_in, nprop_in,
     )
     chem_power_kw = measured["fuel_flow_kgps"] * cfg["fuel"]["Q_LHV_J_per_kg"] / 1000.0
     rho4 = imbalance_kw / max(chem_power_kw, 1e-6)
@@ -139,15 +150,16 @@ def compute_residuals(
     # bearing-wear fault (raised f_fric_scale in the PLANT only) makes Path A
     # overestimate power rather than being absorbed into the estimate.
     #
-    # TAS is not yet a sensed channel (tas_mps is UNMODELLED — see main.py) —
-    # both paths use the same assumed constant the plant's own load model
-    # already uses. A real airspeed sensor is future work; until then this is
-    # a genuine shared limitation, not a hidden one.
+    # Path B is referred to the crank through the nominal gearbox efficiency.
+    # On the constant-speed VRDE profile it runs on its own sensors — air-data
+    # TAS, the prop-speed pickup and blade-angle feedback — none of which Path A
+    # uses, so a friction fault (crank side) and a propeller-side disagreement
+    # pull the two paths apart in opposite directions.
     p_ind  = indicated_power_kw(cfg, measured["fuel_flow_kgps"], measured["rpm"])
     p_prop = propeller_power_kw(
         cfg, measured["rpm"], measured["p_amb_hPa"], measured["oat_K"],
-        cfg["propeller"]["assumed_tas_mps"],
-    )
+        tas_in, beta_in, nprop_in,
+    ) / eta_gb
     p_pwr = max(p_ind, 1e-6)
     rho5  = (p_ind - p_prop) / p_pwr
 

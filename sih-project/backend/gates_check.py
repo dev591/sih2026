@@ -18,7 +18,68 @@ from twin.atmosphere import isa
 from twin.measurement import MeasurementModel
 from parity.residuals import compute_residuals
 
-ALT_FT, THROTTLE, CRUISE_RPM_TARGET = 18000.0, 72.0, 3580.0
+ALT_FT, THROTTLE = 18000.0, 72.0
+
+
+def cruise_rpm_target(cfg, throttle_pct):
+    """
+    Expected crank speed at this throttle. With a constant-speed propeller the
+    governor schedule sets prop speed, and the gearbox sets crank speed from it
+    — so the target is derived from the profile, not a hardcoded number (it was
+    3580, which predates the gearbox).
+    """
+    prop = cfg["propeller"]
+    if prop.get("type") == "constant_speed":
+        gov = prop["governor"]
+        n_prop = float(np.interp(throttle_pct / 100.0,
+                                 gov["schedule_throttle_frac"], gov["schedule_prop_rpm"]))
+        return n_prop * prop["gear_ratio"]
+    return 3580.0
+
+
+# Detector window: ml/inference.py InferencePipeline(window_len=32), the window
+# M2 reconstructs and M3 classifies, with a 4-of-5 persistence rule on top.
+DETECTOR_WINDOW = 32
+PROBE_SETS_PER_POINT = 4
+
+
+def healthy_window_means(cfg, index, window=DETECTOR_WINDOW, probe_sets=PROBE_SETS_PER_POINT):
+    """
+    Healthy population of ONE residual averaged over a detector window.
+
+    Same envelope and step discipline as parity.sigma_generator, but with
+    several independent probe sets per operating point, because a window mean
+    averages away per-sample noise and NOT the fixed per-probe offsets — so the
+    spread across probe sets is what a windowed threshold must clear. Measured
+    empirically rather than assumed to fall as 1/sqrt(window).
+    """
+    import parity.sigma_generator as SG
+    nominal = {
+        'cd_inj': [1.0] * cfg['geometry']['cylinders'],
+        'eta_v_scale': 1.0, 'eta_c_scale': 1.0,
+        'hA_scale': 1.0, 'f_fric_scale': 1.0,
+    }
+    means = []
+    for alt, thr in SG.OPERATING_POINTS:
+        atm = isa(alt)
+        for k in range(probe_sets):
+            seed = (hash((alt, thr)) & 0xFFFF) + 7 * (k + 1)
+            plant, twin = MVEM(cfg, seed=seed), MVEM(cfg, seed=999)
+            mp = MeasurementModel(seed=seed)
+            mt = MeasurementModel(seed=999, is_twin=True)
+            for _ in range(SG.STEPS_TO_STEADY_STATE):
+                plant.step(SG.DT, nominal, atm, thr)
+                twin.step(SG.DT, nominal, atm, thr)
+            buf = []
+            for _ in range(window):
+                plant.step(SG.DT, nominal, atm, thr)
+                twin.step(SG.DT, nominal, atm, thr)
+                rho = compute_residuals(mp.measure(plant.get_outputs(), add_noise=True),
+                                        mt.measure(twin.get_outputs(), add_noise=False),
+                                        cfg, sigma_vec=None)
+                buf.append(rho[index])
+            means.append(float(np.mean(buf)))
+    return np.array(means)
 
 
 def run_to_steady_state(cfg, alt_ft, throttle, seconds=180):
@@ -81,11 +142,12 @@ def main():
     # 18,000 ft, 72% throttle), all smoke-limited. 50% is a threshold BELOW
     # every measured value with real margin, not tuned to the single number
     # that happened to pass.
-    rpm_dev = abs(rpm - CRUISE_RPM_TARGET) / CRUISE_RPM_TARGET
+    rpm_target = cruise_rpm_target(cfg, THROTTLE)
+    rpm_dev = abs(rpm - rpm_target) / rpm_target
     g3 = (power_frac >= 0.50) and (rpm_dev <= 0.05)
     results.append(("3", "Shaft power & speed",
                      f"{power_kW:.1f} kW ({power_frac*100:.0f}% rated), {rpm:.0f} rpm ({rpm_dev*100:.1f}% off target)",
-                     ">=50% rated (re-derived, fuel-led diesel — see comment), N within 5% of 3580", g3))
+                     f">=50% rated (re-derived, fuel-led diesel — see comment), N within 5% of {rpm_target:.0f} (governor schedule x gear ratio)", g3))
 
     print("\nRe-running sigma_generator against the fixed MVEM...")
     import importlib
@@ -151,12 +213,28 @@ def main():
     rho_fric = compute_residuals(measured_b, predicted_b, cfg, sigma_vec=None)
     snr5 = abs(rho_fric[4]) / max(sigma5, 1e-12)
 
-    g4 = (snr1 >= 3.0) and (snr5 >= 3.0)
-    results.append(("4", "rho1 vs compressor fault, rho5 vs friction fault, both >=3 sigma",
-                     f"sigma1={sigma1:.5f} sigma5={sigma5:.5f}  |  "
-                     f"25% compressor fault -> rho1 SNR={snr1:.2f} sigma  |  "
-                     f"60% friction increase -> rho5 SNR={snr5:.2f} sigma",
-                     ">= 3 sigma detection, each on its OWN documented fault type (scaling-invariant)", g4))
+    # rho5 is judged on the DETECTOR'S WINDOW, not a single sample. On a
+    # constant-speed propeller, Path B depends on blade angle (~19 % of rho5
+    # per degree) and TAS (~4 % per m/s), so per-sample sensor noise is
+    # comparable to a friction fault's signal even after the commissioning
+    # calibration of those two channels. The deployed detector never acts on
+    # one sample: M2/M3 consume a 32-sample window with 4-of-5 persistence, so
+    # that is the statistic this gate holds rho5 to. The per-sample SNR is
+    # still printed so nobody mistakes the windowed figure for it.
+    # On this profile rho10 (oil pressure, Gate 5) is the PRIMARY friction
+    # channel and rho5 is corroborating.
+    print(f"Healthy {DETECTOR_WINDOW}-sample window population for rho5 "
+          f"({PROBE_SETS_PER_POINT} probe sets x {len(__import__('parity.sigma_generator', fromlist=['x']).OPERATING_POINTS)} points)...")
+    w5 = healthy_window_means(cfg, 4)
+    sigma5_w = float(np.std(w5))
+    snr5_w = abs(rho_fric[4]) / max(sigma5_w, 1e-12)
+
+    g4 = (snr1 >= 3.0) and (snr5_w >= 3.0)
+    results.append(("4", "rho1 vs compressor fault (per sample), rho5 vs friction fault (detector window), both >=3 sigma",
+                     f"sigma1={sigma1:.5f}  25% compressor fault -> rho1 SNR={snr1:.2f} sigma  |  "
+                     f"60% friction -> rho5 {rho_fric[4]:+.4f}: per-sample SNR={snr5:.2f} (sigma5={sigma5:.5f}), "
+                     f"{DETECTOR_WINDOW}-sample window SNR={snr5_w:.2f} (sigma5_w={sigma5_w:.5f})",
+                     ">= 3 sigma on each residual's own fault type; rho5 on the 32-sample detector window (see comment)", g4))
 
     print("Perturbing f_fric_scale to check rho10 responds...")
     nominal = {'cd_inj': [1.0]*cfg['geometry']['cylinders'], 'eta_v_scale': 1.0,

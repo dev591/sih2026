@@ -14,8 +14,11 @@ Tests:
   3. Sensor/engine asymmetry — sensor bias changes measurement, not engine state
   4. Fault isolation  — per-fault assertions: plant moves, twin doesn't;
                         sensor faults leave get_outputs() bit-identical
+  5. Drivetrain       — gearbox kinematics, governor holds schedule,
+                        subsonic propeller tip, gearbox oil within limit
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -297,6 +300,84 @@ def test_fault_isolation(cfg):
 
 
 # ---------------------------------------------------------------------------
+# Test 5 — Drivetrain: gearbox, constant-speed propeller, governor
+# ---------------------------------------------------------------------------
+
+def test_drivetrain(cfg):
+    print("Test 5 — gearbox, constant-speed propeller and governor...")
+    prop = cfg["propeller"]
+    gov = prop["governor"]
+    nom = {
+        "cd_inj": [1.0] * cfg["geometry"]["cylinders"],
+        "eta_v_scale": 1.0, "eta_c_scale": 1.0,
+        "hA_scale": 1.0, "f_fric_scale": 1.0,
+    }
+    assert prop["gear_ratio"] == cfg["geometry"]["gear_ratio"], (
+        "geometry.gear_ratio and propeller.gear_ratio disagree — the rho5 "
+        "closure breaks silently when they do"
+    )
+
+    # (label, altitude_ft, throttle_pct, TAS m/s)
+    cases = [
+        ("sea-level take-off", 0, 100.0, 40.0),
+        ("18,000 ft cruise", 18000, 72.0, 61.2),
+        ("32,000 ft ceiling", 32000, 100.0, 61.2),
+    ]
+    for label, alt, thr, tas in cases:
+        atm = isa(alt)
+        plant = MVEM(cfg)
+        for _ in range(120):
+            plant.step(1.0, nom, atm, thr, tas_mps=tas)
+        out = plant.get_outputs()
+
+        n_set = plant.prop_rpm_setpoint(thr / 100.0)
+        beta = out["blade_angle_deg"]
+        on_stop = (beta <= prop["beta_fine_stop_deg"] + 1e-6
+                   or beta >= prop["beta_coarse_stop_deg"] - 1e-6)
+
+        assert abs(out["prop_rpm"] * prop["gear_ratio"] - out["rpm"]) < 1e-6, (
+            f"{label}: prop speed must be crank speed through the gearbox"
+        )
+        if not on_stop:
+            assert abs(out["prop_rpm"] - n_set) / n_set < 0.01, (
+                f"{label}: governor off schedule — prop {out['prop_rpm']:.0f} vs {n_set:.0f} rpm"
+            )
+        n_rps = out["prop_rpm"] / 60.0
+        tip = math.hypot(math.pi * prop["diameter_m"] * n_rps, tas)
+        mach = tip / math.sqrt(1.4 * 287.05 * atm["T"])
+        assert mach < 0.85, f"{label}: helical tip Mach {mach:.2f} >= 0.85"
+        assert out["gearbox_oil_C"] < cfg["limits"]["gearbox_oil_C"], (
+            f"{label}: gearbox oil {out['gearbox_oil_C']:.1f} C over its limit"
+        )
+        print(f"  {label:<20} prop {out['prop_rpm']:6.0f}/{n_set:.0f} rpm  "
+              f"beta {beta:5.1f} deg  tip M {mach:.2f}  "
+              f"gearbox oil {out['gearbox_oil_C']:5.1f} C  "
+              f"brake {out['brake_power_kW']:5.1f} kW"
+              f"{'  (on a pitch stop)' if on_stop else ''}")
+
+    # The defining constant-speed property: change airspeed at fixed throttle
+    # and the governor answers with PITCH, not rpm. A fixed-pitch propeller
+    # would change rpm instead.
+    atm = isa(18000)
+    betas = []
+    for tas in (50.0, 70.0):
+        plant = MVEM(cfg)
+        for _ in range(120):
+            plant.step(1.0, nom, atm, 72.0, tas_mps=tas)
+        out = plant.get_outputs()
+        n_set = plant.prop_rpm_setpoint(0.72)
+        assert abs(out["prop_rpm"] - n_set) / n_set < 0.01, (
+            f"TAS {tas}: governor lost speed ({out['prop_rpm']:.0f} vs {n_set:.0f})"
+        )
+        betas.append(out["blade_angle_deg"])
+    assert betas[1] - betas[0] > 1.0, (
+        f"Faster airspeed must coarsen pitch at held rpm; beta {betas[0]:.2f} -> {betas[1]:.2f}"
+    )
+    print(f"  TAS 50 -> 70 m/s at 18,000 ft / 72 %: rpm held, beta {betas[0]:.1f} -> {betas[1]:.1f} deg")
+    print("  PASSED")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -305,6 +386,7 @@ def run_tests():
     test_op_invariance_and_sum_to_zero(cfg)
     test_sensor_engine_asymmetry(cfg)
     test_fault_isolation(cfg)
+    test_drivetrain(cfg)
     print("\nALL VERIFICATION TESTS PASSED.")
 
 

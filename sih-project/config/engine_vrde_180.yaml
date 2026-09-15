@@ -31,13 +31,21 @@ profile:
 # ---------------------------------------------------------------------------
 geometry:
   cylinders: 4
-  provenance: assumed      # displacement/bore/stroke not published; sized to 180 hp
-  displacement_m3: 2.0e-3  # V_d, swept volume [m^3]
-  bore_m: 0.086            # B — enters the Woschni correlation directly
-  stroke_m: 0.086
-  compression_ratio: 17.5
-  connecting_rod_m: 0.150
-  strokes_per_cycle: 4     # the 120 in the speed-density relation is 2 rev x 60 s
+  layout: inline
+  # Per-field provenance — docs/research/VRDE-PUBLIC-DOSSIER.md §1-2.
+  # DRDO/Jayem publish "2.2 L inline-4". The specific base block (Mahindra
+  # mHawk 2.2, 2179 cc) is a community claim, adopted deliberately and labelled,
+  # because it is the only public source that pins "2.2 L" to a real swept
+  # volume. Replaces 2.0 L / 86x86 mm / CR 17.5, which were sized to hit 180 hp
+  # and matched nothing published.
+  provenance: unverified_community
+  displacement_m3: 2.179e-3  # V_d — unverified_community (mHawk 2.2, 2179 cc)
+  bore_m: 0.085              # assumed — 85 x 96 mm reproduces 2179 cc exactly; not found in a public source
+  stroke_m: 0.096            # assumed — see bore_m
+  compression_ratio: 15.5    # published for the AUTOMOTIVE mHawk; the aero build's CR is not public
+  connecting_rod_m: 0.150    # assumed; not used by the mean-value model
+  strokes_per_cycle: 4       # the 120 in the speed-density relation is 2 rev x 60 s
+  gear_ratio: 1.69           # keep in sync with propeller.gear_ratio — see that block
 
 # ---------------------------------------------------------------------------
 # RATINGS
@@ -48,9 +56,16 @@ ratings:
   rated_power_hp: 180
   critical_altitude_ft: 11000    # above this the turbo cannot hold rated MAP
   critical_altitude_m: 3352.8
-  rated_speed_rpm: 3800          # provenance: assumed
-  max_continuous_rpm: 3600       # provenance: assumed
-  idle_rpm: 900                  # provenance: assumed
+  # Crank speeds: VRDE publishes none. Taken from the same-class engine the
+  # VRDE unit replaces on TAPAS (Austro E4P, EASA TCDS E.200), labelled so.
+  # Through the 1.69 gearbox these give the certificated prop speeds below,
+  # which is what keeps the propeller tip subsonic — the previous 3800 rpm
+  # direct drive on a 1.65 m propeller put the tip at ~328 m/s, supersonic.
+  rated_speed_rpm: 3880          # published_comparable_engine — E4P take-off
+  max_continuous_rpm: 3720       # published_comparable_engine — E4P max continuous
+  idle_rpm: 900                  # assumed
+  takeoff_prop_rpm: 2300         # published_comparable_engine
+  max_continuous_prop_rpm: 2200  # published_comparable_engine
 
 # ---------------------------------------------------------------------------
 # PUBLISHED VALIDATION ANCHORS — deliberately separate from model parameters.
@@ -156,6 +171,7 @@ limits:
   cht_C: 200.0                   # cylinder head temperature
   coolant_C: 110.0
   oil_temp_C: 130.0
+  gearbox_oil_C: 120.0           # published_comparable_engine — TCDS E.200 max gearbox temperature
   oil_pressure_bar:
     min_above_2500rpm: 2.0
     min_below_2500rpm: 0.8
@@ -375,9 +391,38 @@ mvem:
     mdot_ex_design_kgps: 0.032            # calibrated to 18kft/72% cruise exhaust flow
     pressure_ratio_max: 3.2               # choke limit — typical for a small single-stage turbine
 
+  wastegate:
+    # FADEC closed-loop boost control. provenance: assumed.
+    # This was a hardcoded proportional-only gain (`_wastegate_gain = 14.0` in
+    # mvem.py). Proportional-only control cannot reach its own target: measured
+    # after the 2179 cc change, MAP sat +33 to +48 mbar ABOVE the FADEC's MAP
+    # target at every point checked (0-18,000 ft, 60-72 %), which also pushed
+    # Gate 1 0.46 mbar over its 1.4 bar ceiling. A real FADEC boost loop carries
+    # integral action for exactly this reason. Integral time 2 s: slower than
+    # turbo spool so the loop does not fight turbo lag, fast against the
+    # mission's altitude and throttle changes. The proportional gain is the
+    # previously calibrated value, unchanged.
+    proportional_gain_per_bar: 14.0
+    integral_time_s: 2.0
+
   crankshaft:
     inertia_kgm2: 0.35                    # J
     friction_coeff_nominal: 1.0           # f_fric — UKF state; bearing wear channel
+
+  gearbox:
+    # Integrated propeller reduction gearbox — published for VRDE; its ratio is
+    # not, see geometry.gear_ratio. provenance: assumed. A single-stage
+    # spur/helical reduction runs 97-98 % efficient; mid-range value.
+    efficiency: 0.975
+    # Gearbox oil thermal node. provenance: assumed. Heat in is the gearbox
+    # loss, (1/efficiency - 1) * propeller power; heat out goes to engine
+    # coolant through the gearbox oil line (the E4P took its power increase
+    # partly by adding cooling in exactly that line). Sized as a heat exchanger
+    # so sea-level take-off settles ~15 K under the 120 degC comparable limit:
+    #   Q = (1/0.975 - 1) * 130.8 kW = 3.35 kW;  T_gb - T_cool = 105 - 90 = 15 K
+    #   UA = 3350 / 15 = 224 W/K.  tau = 6000 / 224 = 27 s.
+    oil_thermal_mass_kJ_per_K: 6.0
+    oil_to_coolant_UA_W_per_K: 224.0
 
   combustion:
     # provenance: calibrated. 0.40 is the low end for a modern FADEC-
@@ -441,26 +486,69 @@ mvem:
 # A propeller is a calibrated dynamometer: P = C_P(J) * rho * n^3 * D^5
 # ---------------------------------------------------------------------------
 propeller:
-  # provenance: calibrated. prop_cp_map.csv never existed. Replaced with a
-  # two-parameter fixed-pitch Cp(J) curve — PRAMANA-DIRECTIVE-2026-09-10.md
-  # §1.5. FIXED-PITCH chosen over constant-speed: this VRDE profile has no
-  # governor/pitch-actuator model, and a MALE UAV airframe could plausibly
-  # carry either — stating the choice explicitly per the directive's
-  # instruction, not leaving it ambiguous.
-  #   Cp(J) = cp0 * max(1 - (J/J_max)^2, 0)      J = V_TAS / (n * D)
-  #   P_prop = Cp(J) * rho_air(h) * n^3 * D^5
-  # cp0/J_max are proposed, not sourced from a published prop curve for this
-  # specific airframe — sized so P_prop lands near the rated design point at
-  # rated_speed_rpm and the assumed cruise TAS below. This is what makes
-  # rho5 (= P_indicated - P_prop) a genuine second, independent estimate of
-  # shaft power instead of a made-up quadratic with no physical content.
+  # CONSTANT-SPEED propeller with a governor. VRDE's own 2015 specification
+  # lists a "propeller governor" (docs/research/VRDE-PUBLIC-DOSSIER.md §1), so
+  # the previous fixed-pitch model was the wrong machine. The governor moves
+  # blade pitch to hold a scheduled prop speed: throttle changes TORQUE while
+  # rpm holds, as on the real aircraft.
+  type: constant_speed
   provenance: assumed
-  diameter_m: 1.65               # D
+  diameter_m: 1.90               # assumed — helical tip Mach 0.79 at 2300 rpm and
+                                 # 61 m/s TAS at the 32,000 ft ceiling (a = 300.6 m/s)
   blades: 3
-  cp0: 0.075                     # power coefficient at zero advance ratio
-  j_max: 1.05                    # advance ratio at zero net power (feathered/windmill point)
-  assumed_tas_mps: 61.2           # matches main.py's current fixed slow.tas_mps
-  gear_ratio: 1.0                # direct drive
+  gear_ratio: 1.69               # published_comparable_engine (E4P); keep in sync with geometry.gear_ratio
+  inertia_kgm2: 1.2              # assumed — 3-blade composite; reflected to the crank as J / ratio^2
+
+  # POWER COEFFICIENT — single-station blade element at 0.75 R:
+  #   phi   = atan(J / (0.75 pi))                    inflow angle
+  #   alpha = beta - phi                             section angle of attack
+  #   Cl    = cl_alpha * alpha, capped at +/- cl_max
+  #   Cd    = cd0 + k_induced * Cl^2
+  #   Cp    = k_power * ((0.75 pi)^2 + J^2) * (Cl sin(phi) + Cd cos(phi))
+  # Form: McCormick, "Aerodynamics, Aeronautics and Flight Mechanics", 2nd ed.,
+  # blade-element theory, evaluated at the representative 0.75 R station with
+  # induced velocity neglected. That neglect makes it poor at very low advance
+  # ratio (static, J < ~0.3), which the scenario never visits — stated, not
+  # hidden. The same function is the plant's load AND parity Path B of rho5
+  # (twin/airpath.py::propeller_cp), for the reason the compressor map is shared.
+  cp_model: blade_element_075R
+  cl_alpha_per_rad: 6.2832       # published — thin-airfoil lift slope, 2 pi per rad
+  cl_max: 1.2                    # assumed — pre-stall section limit
+  cd0: 0.012                     # assumed — clean section profile drag
+  k_induced: 0.02                # assumed — lift-dependent drag factor
+  # k_power is SIZED, not fitted to a test. A propeller matched to this engine
+  # absorbs rated shaft power at the sea-level take-off design point (2300 prop
+  # rpm, 40 m/s -> J = 0.549, phi = 13.1 deg) at a moderate 6 deg angle of
+  # attack, i.e. beta = 19.1 deg:
+  #   Cp_req = 0.975 * 134.2 kW / (1.225 * 38.33^3 * 1.90^5) = 0.0766
+  #   Cl = 0.658, Cd = 0.0207 -> Cl sin(phi) + Cd cos(phi) = 0.1695
+  #   k_power = 0.0766 / (5.852 * 0.1695) = 0.0772
+  k_power: 0.0772
+  beta_fine_stop_deg: 12.0       # assumed — low-pitch stop
+  beta_coarse_stop_deg: 45.0     # assumed — high-pitch stop (not a feathering model)
+
+  governor:
+    # Prop-speed setpoint from the single power lever, as a FADEC schedules it.
+    # provenance: assumed shape between published_comparable_engine end points
+    # (2200 max-continuous, 2300 take-off prop rpm). The AE300's actual schedule
+    # is in its operation manual, which is not public.
+    schedule_throttle_frac: [0.0, 0.50, 0.95, 1.00]
+    schedule_prop_rpm:      [1900, 2050, 2200, 2300]
+    # PI on fractional prop-speed error, output in degrees of pitch. DERIVED
+    # from the linearised speed loop at the take-off design point, not tuned:
+    #   dCp/dbeta = 0.717 /rad -> dP/dbeta = 21.4 kW/deg -> 54.0 N m/deg at the crank
+    #   J_eff = 0.35 + 1.2 / 1.69^2 = 0.770 kg m^2 -> 70.1 rad/s^2 per deg
+    #   load damping 2T/w = 1.63 N m s -> 2.11 /s
+    #   s^2 + (2.11 + 0.1725 kp) s + 0.1725 ki = 0;  target wn = 3 rad/s, zeta = 0.8
+    #   -> kp = 15.6 deg per unit error, ki = 52.2 deg/s per unit error
+    # ~0.5-1 s is the normal response of a hydraulic piston-prop governor.
+    kp_deg_per_unit_error: 15.6
+    ki_deg_per_s_per_unit_error: 52.2
+    pitch_rate_limit_deg_per_s: 15.0   # assumed — hydraulic pitch-change rate
+
+  assumed_tas_mps: 61.2          # DEFAULT only, for call sites with no scenario TAS
+                                 # (offline tests, validation). Live frames pass the
+                                 # scenario TAS, sensed through config/sensors.yaml tas_mps.
 
 # ---------------------------------------------------------------------------
 # PARITY PATH AVAILABILITY — which of the four air-mass-flow estimates this

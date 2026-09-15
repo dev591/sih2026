@@ -1,6 +1,6 @@
 import numpy as np
 
-from .airpath import compressor_ellipse
+from .airpath import compressor_ellipse, propeller_cp
 import random
 
 class MVEM:
@@ -117,18 +117,48 @@ class MVEM:
         self._map_takeoff_bar = self.cfg['limits']['manifold_pressure_hPa'].get(
             'takeoff', self.cfg['limits']['manifold_pressure_hPa']['max_continuous']
         ) / 1000.0
-        self._wastegate_gain = 14.0  # 1/bar — proportional control on bypass fraction
+        # Boost controller gains. A profile without a wastegate block (Rotax)
+        # keeps the original proportional-only law, bit-identical.
+        wg = mvem_cfg.get('wastegate', {})
+        self._wastegate_gain = wg.get('proportional_gain_per_bar', 14.0)
+        t_i = wg.get('integral_time_s')
+        self._wastegate_ki = (self._wastegate_gain / t_i) if t_i else 0.0
+        self._wg_int = 0.0
 
-        # --- Propeller load — §1.5. Replaces a made-up quadratic that had
-        # no dependence on air density and was additionally (and
-        # incorrectly) scaled by throttle_pct directly, coupling the load
-        # model to the FUEL schedule rather than to propeller aerodynamics.
+        # --- Propeller load — §1.5, now through a reduction gearbox and, where
+        # the profile declares one, a constant-speed propeller with a governor.
+        # The power coefficient is twin/airpath.py::propeller_cp, shared with
+        # parity Path B of rho5 so plant and estimator evaluate one law.
         prop = self.cfg['propeller']
+        self._prop = prop
         self.D_prop = prop['diameter_m']
-        self._cp0 = prop['cp0']
-        self._j_max = prop['j_max']
         self._tas = prop['assumed_tas_mps']
+        self._tas_last = float(self._tas)
         self._gear_ratio = prop.get('gear_ratio', 1.0)
+        self._constant_speed = prop.get('type') == 'constant_speed'
+
+        # Reduction gearbox. A profile without a gearbox block (the Rotax
+        # transfer profile) keeps efficiency 1.0 and no oil node, so its
+        # numbers are bit-identical to before this change.
+        gb = mvem_cfg.get('gearbox')
+        self._has_gearbox = gb is not None
+        self._eta_gb = gb.get('efficiency', 1.0) if gb else 1.0
+        if gb:
+            self._gb_thermal_mass_J = gb['oil_thermal_mass_kJ_per_K'] * 1000.0
+            self._gb_UA = gb['oil_to_coolant_UA_W_per_K']
+        self.P_prop_last = 0.0
+
+        if self._constant_speed:
+            gov = prop['governor']
+            self._gov_x = list(gov['schedule_throttle_frac'])
+            self._gov_y = list(gov['schedule_prop_rpm'])
+            self._gov_kp = gov['kp_deg_per_unit_error']
+            self._gov_ki = gov['ki_deg_per_s_per_unit_error']
+            self._pitch_rate = gov['pitch_rate_limit_deg_per_s']
+            self._beta_min = prop['beta_fine_stop_deg']
+            self._beta_max = prop['beta_coarse_stop_deg']
+            # Propeller inertia, reflected to the crank through the gearbox.
+            self.J = self.J + prop.get('inertia_kgm2', 0.0) / self._gear_ratio ** 2
 
         # --- Oil system — §1.6. See the yaml comment for the physics. -----
         oil = mvem_cfg.get('oil', {})
@@ -146,8 +176,15 @@ class MVEM:
 
         # ---- States ---------------------------------------------------
         self.p_im = 101325.0
-        self.w = 3800.0 * 2 * np.pi / 60
+        self.w = self.cfg['ratings'].get('rated_speed_rpm', 3800.0) * 2 * np.pi / 60
         self.T_cht = np.full(self.N_cyl, 363.15 + 50)
+        # Governor state. Pitch starts mid-range and the PI loop settles it
+        # within seconds; the trim holds that start point so the integrator
+        # carries only the correction.
+        self.beta_deg = 25.0
+        self._beta_trim = self.beta_deg
+        self._gov_int = 0.0
+        self.T_gb = self.T_cool + 10.0
 
         # Turbo shaft state is KINETIC ENERGY, not speed — §1.1. The old
         # dw_tc/dt = (P_turb-P_comp)/(J_tc*w_tc) has a 1/w_tc singularity: as
@@ -190,6 +227,29 @@ class MVEM:
         self.pi_t_last = 1.0
         self.oil_press_bar_val = 3.4
 
+    def prop_rpm_setpoint(self, throttle_frac: float) -> float:
+        return float(np.interp(throttle_frac, self._gov_x, self._gov_y))
+
+    def _govern(self, n_prop_rps: float, throttle_frac: float, h: float) -> None:
+        """
+        PI governor on fractional prop-speed error, acting on blade pitch.
+
+        Overspeed coarsens pitch (more load), underspeed fines it. Pitch is
+        rate-limited like a hydraulic pitch-change mechanism and bounded by the
+        fine/coarse stops, with the integrator frozen while on a stop so it
+        cannot wind up. An engine too weak to reach its setpoint sits on the
+        fine stop below it: correct behaviour, not a control failure.
+        """
+        n_set = self.prop_rpm_setpoint(throttle_frac) / 60.0
+        err = (n_prop_rps - n_set) / n_set
+        integ = self._gov_int + err * h
+        beta_cmd = self._beta_trim + self._gov_kp * err + self._gov_ki * integ
+        if self._beta_min < beta_cmd < self._beta_max:
+            self._gov_int = integ
+        beta_cmd = min(max(beta_cmd, self._beta_min), self._beta_max)
+        max_step = self._pitch_rate * h
+        self.beta_deg += min(max(beta_cmd - self.beta_deg, -max_step), max_step)
+
     @property
     def w_tc(self) -> float:
         return float(np.sqrt(max(2.0 * self.E_tc, 0.0) / self.J_tc))
@@ -209,7 +269,8 @@ class MVEM:
         return compressor_ellipse(self.cfg, float(w_tc), float(Pi_c),
                                   float(p01), float(T01), float(phi_scale))
 
-    def step(self, dt: float, params: dict, atm: dict, throttle_pct: float):
+    def step(self, dt: float, params: dict, atm: dict, throttle_pct: float,
+             tas_mps: float | None = None):
         cd_inj = np.array(params.get('cd_inj', np.ones(self.N_cyl)))
         eta_v_scale = params.get('eta_v_scale', 1.0)
         eta_c_scale = params.get('eta_c_scale', 1.0)
@@ -222,6 +283,10 @@ class MVEM:
 
         p_atm = atm['p']
         T_atm = atm['T']
+        # True airspeed is a scenario input (there is no airframe model). Call
+        # sites that pass none get the profile's default.
+        tas = self._tas if tas_mps is None else float(tas_mps)
+        self._tas_last = tas
 
         # Retained so get_outputs() can report them. These are environment, not
         # engine state, but they ARE separately instrumented on a real
@@ -332,11 +397,17 @@ class MVEM:
             # regardless of what the propeller itself would actually be
             # absorbing at that airspeed and rpm).
             n_prop_rps = max(self.w / self._gear_ratio, 1.0) / (2 * np.pi)
-            J = self._tas / (n_prop_rps * self.D_prop)
-            Cp = self._cp0 * max(1.0 - (J / self._j_max) ** 2, 0.0)
+            J = tas / (n_prop_rps * self.D_prop)
+            if self._constant_speed:
+                self._govern(n_prop_rps, throttle_frac, h)
+                Cp = propeller_cp(self._prop, J, self.beta_deg)
+            else:
+                Cp = propeller_cp(self._prop, J)
             rho_air = p_atm / (self.R * max(T_atm, 1.0))
             P_prop = Cp * rho_air * n_prop_rps ** 3 * self.D_prop ** 5
-            T_load = P_prop / max(self.w, 1.0)
+            self.P_prop_last = P_prop
+            # Crank-side load: propeller power plus the gearbox's own loss.
+            T_load = P_prop / (self._eta_gb * max(self.w, 1.0))
 
             dw_dt = (T_ind - T_fric - T_pump - T_load) / self.J
             self.brake_power_kW = (T_ind - T_fric - T_pump) * self.w / 1000.0
@@ -432,9 +503,15 @@ class MVEM:
                 # the assertion below expects P_turb > 0 whenever fuel
                 # flows — full bypass would make that structurally false
                 # for the wrong reason (valve position, not a model bug).
-                bypass_frac = float(np.clip(
-                    self._wastegate_gain * (p_im_bar_now - target_map_bar), 0.0, 0.95
-                ))
+                wg_err = p_im_bar_now - target_map_bar
+                wg_int = self._wg_int + wg_err * h_tc
+                bypass_cmd = self._wastegate_gain * wg_err + self._wastegate_ki * wg_int
+                bypass_frac = float(np.clip(bypass_cmd, 0.0, 0.95))
+                # Conditional integration: hold the integrator while the valve
+                # sits on an end stop (e.g. fully shut above critical altitude),
+                # so it cannot wind up and overshoot on the way back.
+                if 0.0 < bypass_cmd < 0.95:
+                    self._wg_int = wg_int
 
                 # Turbine expansion ratio comes from the EXHAUST side, via a
                 # flow-driven backpressure model — independent of p_im. This
@@ -473,6 +550,10 @@ class MVEM:
             self.T_cht += dT_cht_dt * h
             self.T_oil += dT_oil_dt * h
             self.T_oil = max(self.T_oil, 250.0)
+            if self._has_gearbox:
+                q_gb = (1.0 / self._eta_gb - 1.0) * max(P_prop, 0.0)
+                self.T_gb += (q_gb - self._gb_UA * (self.T_gb - self.T_cool)) \
+                    / self._gb_thermal_mass_J * h
 
             self.w = max(self.w, 10.0)
             # No floor on p_im at 0.4*p_atm — the old clamp WAS the
@@ -512,4 +593,10 @@ class MVEM:
             # Compressor INLET conditions — parity Path 2's own sensors.
             'p_amb_hPa': float(self.p_amb / 100.0),
             'oat_K': float(self.T_amb),
+            # Drivetrain and air data.
+            'prop_rpm': float(self.w / self._gear_ratio * 60 / (2 * np.pi)),
+            'blade_angle_deg': float(self.beta_deg) if self._constant_speed else None,
+            'gearbox_oil_C': float(self.T_gb - 273.15) if self._has_gearbox else None,
+            'prop_power_kW': float(self.P_prop_last / 1000.0),
+            'tas_mps': float(self._tas_last),
         }

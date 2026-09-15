@@ -333,6 +333,92 @@ channels:
       +/-0.66 % and 1 s of lag.
 
 # ---------------------------------------------------------------------------
+# DRIVETRAIN AND AIR DATA — added with the gearbox and constant-speed propeller.
+# APPENDED after every existing channel on purpose: MeasurementModel draws the
+# per-probe offsets in file order, so appending leaves every existing probe's
+# offset bit-identical for the same seed.
+# ---------------------------------------------------------------------------
+  tas_mps:
+    sensor: air_data_pitot_static
+    provenance: assumed
+    units: m/s
+    range: [0.0, 120.0]
+    tolerance_abs: 1.0            # assumed — ~2 kt, typical small air-data computer
+    noise_sigma: 0.3              # assumed
+    tau_s: 0.5                    # assumed — pitot/static line lag
+    averaging_window_n: 8
+    dominant_error: tolerance
+    commissioning_calibration:
+      provenance: assumed
+      method: "air-data position-error calibration against GPS ground speed (multi-heading method)"
+      residual_error_abs: 0.3     # assumed — what survives the calibration, m/s
+    notes: >
+      Every UAV carries air data for flight control, so TAS is a genuinely
+      sensed channel, not an engine sensor. Parity Path B of rho5 needs it: the
+      propeller's absorbed power depends on advance ratio J = V/(nD). It was a
+      frozen UNMODELLED constant that the plant and the estimator both shared.
+
+  prop_rpm:
+    sensor: magnetic_pickup_period_counting
+    provenance: assumed
+    units: rpm
+    range: [0.0, 3000.0]
+    noise_sigma: 1.0              # assumed
+    tau_s: 0.0
+    averaging_window_n: 1
+    dominant_error: update_granularity
+    notes: >
+      A separate pickup on the propeller flange / governor drive — not the crank
+      60-2 wheel divided by the gear ratio. Separate hardware is what lets rho5
+      see a disagreement on the propeller side. Period counting at these speeds
+      resolves well under 1 rpm, so no tooth grid is modelled.
+
+  blade_angle_deg:
+    sensor: pitch_actuator_position_feedback
+    provenance: assumed
+    units: deg
+    range: [0.0, 60.0]
+    tolerance_abs: 0.3            # assumed — ~1 % of the 12-45 deg working span
+    noise_sigma: 0.05             # assumed
+    tau_s: 0.05                   # assumed
+    averaging_window_n: 4
+    dominant_error: tolerance
+    commissioning_calibration:
+      provenance: assumed
+      method: "propeller rigging check — protractor at the 0.75 R reference station against the feedback sensor"
+      residual_error_abs: 0.1     # assumed — protractor reading resolution, deg
+    notes: >
+      Blade-angle (beta) feedback from the axial position of the pitch-change
+      piston / beta tube, or a servo pitch motor's Hall encoder (+/-1 % class).
+      Both exist on real constant-speed propeller systems (US patent 11873771;
+      "Design and testing of an innovative integrated propeller measurement
+      system for torque, pitch angle, speed and phase angle", Aerospace Science
+      and Technology, 2025). Its installation on the VRDE airframe is not
+      published, hence assumed. Parity Path B of rho5 cannot be closed without
+      it on a constant-speed propeller.
+      WHY IT IS CALIBRATED: measured, a 0.3 deg blade-angle offset moves rho5
+      by 5.7 % and a 1 m/s TAS offset by 4.3 %, against ~5.8 % for a 60 %
+      friction fault. Uncalibrated, these two fixed offsets raised sigma5 from
+      0.0028 to 0.077. A rigging check and an air-data calibration are routine
+      practice, so the twin models them — as the reference instrument's own
+      residual error, never as a perfect removal.
+
+  gearbox_oil_C:
+    sensor: ntc_thermistor
+    provenance: assumed
+    units: degC
+    range: [-40.0, 160.0]
+    tolerance_degC: 2.0
+    noise_sigma: 0.2
+    tau_s: 5.0                    # assumed — immersed probe, same class as oil_temp_C
+    averaging_window_n: 16
+    dominant_error: tolerance
+    notes: >
+      A certificated limit channel on the same-class engine (120 degC, EASA
+      TCDS E.200), not a convenience channel. The oil's bulk thermal time
+      constant lives in the plant, not here.
+
+# ---------------------------------------------------------------------------
 # FAILURE MODES — what a transducer actually does when it fails
 # ---------------------------------------------------------------------------
 # Today drift/offset is the ONLY modelled sensor failure, and it ramps

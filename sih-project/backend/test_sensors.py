@@ -64,6 +64,11 @@ def _phys(egt=720.0, cht=140.0, iat_K=318.0, n_cyl=4, rpm=3580.0):
         # Compressor inlet conditions — parity Path 2's own sensors.
         "p_amb_hPa": 506.0,      # ~18,000 ft
         "oat_K": 252.0,
+        # Air data and drivetrain.
+        "tas_mps": 61.2,
+        "prop_rpm": 2123.0,
+        "blade_angle_deg": 26.0,
+        "gearbox_oil_C": 95.0,
     }
 
 
@@ -277,6 +282,46 @@ def test_twin_and_plant_agree_when_physics_agrees():
     print("  PASSED")
 
 
+def test_drivetrain_channels():
+    """
+    The four channels added with the gearbox and constant-speed propeller:
+    fixed tolerances belong to the plant only, and a profile without a pitch
+    or gearbox-oil sensor reads None rather than a fabricated number.
+    """
+    print("Test 12 — air-data, prop-speed, blade-angle and gearbox-oil channels...")
+    ch = SENSOR_SPEC["channels"]
+    plant = MeasurementModel(seed=21).measure(_phys(), add_noise=False)
+    twin = MeasurementModel(seed=21, is_twin=True).measure(_phys(), add_noise=False)
+
+    assert abs(plant["blade_angle_deg"] - 26.0) <= ch["blade_angle_deg"]["tolerance_abs"] + 1e-9
+    assert abs(plant["tas_mps"] - 61.2) <= ch["tas_mps"]["tolerance_abs"] + 1e-9
+    assert twin["blade_angle_deg"] == 26.0, "Twin must carry no blade-angle offset"
+    assert twin["tas_mps"] == 61.2, "Twin must carry no air-data offset"
+    assert abs(twin["gearbox_oil_C"] - 95.0) < 1.0, (
+        f"Gearbox oil NTC should read ~95 degC, got {twin['gearbox_oil_C']:.2f}"
+    )
+
+    # A commissioned plant probe keeps only the calibration reference's own
+    # error — checked across many probe draws, not one lucky seed.
+    for name, nominal in (("blade_angle_deg", 26.0), ("tas_mps", 61.2)):
+        r = ch[name]["commissioning_calibration"]["residual_error_abs"]
+        worst = max(
+            abs(MeasurementModel(seed=s).measure(_phys(), add_noise=False)[name] - nominal)
+            for s in range(40)
+        )
+        assert worst <= r + 1e-9, f"{name}: post-calibration offset {worst:.3f} > {r}"
+        assert worst > 1e-6, f"{name}: calibration must leave the reference's error, not zero"
+
+    fixed = _phys()
+    fixed["blade_angle_deg"] = None
+    fixed["gearbox_oil_C"] = None
+    out = MeasurementModel(seed=21).measure(fixed, add_noise=False)
+    assert out["blade_angle_deg"] is None and out["gearbox_oil_C"] is None, (
+        "A channel with no sensor must read None, not a number"
+    )
+    print("  PASSED")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("PRAMANA sensor layer tests")
@@ -292,5 +337,6 @@ if __name__ == "__main__":
     test_quantisation_lands_on_grid()
     test_rpm_is_tooth_quantised()
     test_twin_and_plant_agree_when_physics_agrees()
+    test_drivetrain_channels()
     print()
     print("ALL SENSOR TESTS PASSED.")

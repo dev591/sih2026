@@ -208,11 +208,13 @@ def path2_compressor_map(cfg: dict, turbo_rpm: float, map_hPa: float,
 # fault (which raises the TRUE friction coefficient in the plant) shows up as
 # Path A overestimating power rather than being absorbed into the estimate.
 #
-# TAS is the one input both paths still share, and honestly so: there is no
-# airspeed sensor in this model (tas_mps is UNMODELLED — main.py's UNMODELLED
-# dict — and the plant's own P_prop uses the identical assumed constant, see
-# propeller.assumed_tas_mps in the profile). A true airspeed sensor is future
-# work; until then this is a real shared limitation, not a hidden one.
+# On a constant-speed propeller Path B also needs BLADE ANGLE and PROP SPEED:
+# absorbed power depends on pitch as much as on advance ratio. Both are sensed
+# channels (config/sensors.yaml blade_angle_deg, prop_rpm), as is TAS from the
+# air-data system — which retires the old limitation that TAS was an assumed
+# constant shared by the plant and this estimator. The fixed-pitch Rotax
+# transfer profile keeps its commissioned configuration (crank speed through
+# the gear ratio, assumed TAS); see compute_residuals.
 
 def indicated_power_kw(cfg: dict, fuel_flow_kgps: float, rpm: float) -> float:
     """
@@ -235,24 +237,54 @@ def indicated_power_kw(cfg: dict, fuel_flow_kgps: float, rpm: float) -> float:
     return (p_ind_w - p_fric_w) / 1000.0
 
 
-def propeller_power_kw(cfg: dict, rpm: float, p_amb_hPa: float,
-                       oat_K: float, tas_mps: float) -> float:
+def propeller_cp(prop: dict, j: float, beta_deg: float | None = None) -> float:
     """
-    Sensors: crank speed, ambient pressure, OAT — plus TAS, the one input
-    this path still shares with the plant's own load model (see module note:
-    there is no airspeed sensor in this system yet).
+    Propeller power coefficient — ONE implementation for the plant's load and
+    for parity Path B of rho5, for the same reason the compressor map lives in
+    this module.
 
-    P_prop = Cp(J) * rho_air * n^3 * D^5, the same fixed-pitch propeller law
-    mvem.py uses for the load itself, evaluated here as an independent
-    ESTIMATE from measured shaft speed and measured ambient conditions.
+    fixed pitch:     Cp = cp0 * max(1 - (J/J_max)^2, 0)
+    constant speed:  single-station blade element at 0.75 R; form, source and
+                     stated low-J limitation are in the profile's propeller
+                     block.
+    """
+    if prop.get("type") != "constant_speed":
+        return prop["cp0"] * max(1.0 - (j / prop["j_max"]) ** 2, 0.0)
+    phi = math.atan2(j, 0.75 * math.pi)
+    alpha = math.radians(beta_deg) - phi
+    cl_max = prop["cl_max"]
+    cl = min(max(prop["cl_alpha_per_rad"] * alpha, -cl_max), cl_max)
+    cd = prop["cd0"] + prop["k_induced"] * cl * cl
+    return prop["k_power"] * ((0.75 * math.pi) ** 2 + j * j) * (
+        cl * math.sin(phi) + cd * math.cos(phi)
+    )
+
+
+def propeller_power_kw(cfg: dict, rpm: float, p_amb_hPa: float,
+                       oat_K: float, tas_mps: float,
+                       beta_deg: float | None = None,
+                       prop_rpm: float | None = None) -> float:
+    """
+    Power absorbed at the PROPELLER SHAFT, estimated from measured channels.
+
+    Sensors: ambient pressure, OAT, TAS; and, for a constant-speed propeller,
+    the separate prop-speed pickup and blade-angle feedback. A fixed-pitch
+    propeller uses crank speed through the gear ratio and needs no pitch.
+
+    P_prop = Cp(J, beta) * rho_air * n^3 * D^5 — the same propeller law the
+    plant uses for its load, evaluated here as an independent ESTIMATE.
+    Divide by the nominal gearbox efficiency to refer it to the crank.
     """
     prop = cfg["propeller"]
     R, _, _ = _gas(cfg)
 
-    gear_ratio = prop.get("gear_ratio", 1.0)
-    n_prop_rps = max(rpm / gear_ratio, 1.0) / 60.0
+    if prop.get("type") == "constant_speed":
+        n_prop_rps = max(prop_rpm, 1.0) / 60.0
+    else:
+        gear_ratio = prop.get("gear_ratio", 1.0)
+        n_prop_rps = max(rpm / gear_ratio, 1.0) / 60.0
     j = tas_mps / max(n_prop_rps * prop["diameter_m"], 1e-6)
-    cp = prop["cp0"] * max(1.0 - (j / prop["j_max"]) ** 2, 0.0)
+    cp = propeller_cp(prop, j, beta_deg)
 
     rho_air = (p_amb_hPa * 100.0) / (R * max(oat_K, 1.0))
     p_prop_w = cp * rho_air * n_prop_rps ** 3 * prop["diameter_m"] ** 5
@@ -283,7 +315,10 @@ def propeller_power_kw(cfg: dict, rpm: float, p_amb_hPa: float,
 def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
                       map_hPa: float, iat_K: float,
                       egt_C: list, cht_C: list,
-                      p_amb_hPa: float, oat_K: float) -> float:
+                      p_amb_hPa: float, oat_K: float,
+                      tas_mps: float | None = None,
+                      beta_deg: float | None = None,
+                      prop_rpm: float | None = None) -> float:
     """
     Raw energy imbalance in kW (not yet normalised by mdot_f*Q_LHV — the
     caller does that, matching the design's stated criterion).
@@ -304,9 +339,14 @@ def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
     t_cool = m["thermal"]["coolant_temp_K"]
 
     m_a = path1_speed_density(cfg, map_hPa, iat_K, rpm)
+    if tas_mps is None:
+        tas_mps = cfg["propeller"]["assumed_tas_mps"]
+    # Referred to the crank through the NOMINAL gearbox efficiency: gearbox
+    # loss is crank work that became heat, so it belongs inside P_brake here.
+    eta_gb = m.get("gearbox", {}).get("efficiency", 1.0)
     p_brake_w = propeller_power_kw(
-        cfg, rpm, p_amb_hPa, oat_K, cfg["propeller"]["assumed_tas_mps"]
-    ) * 1000.0
+        cfg, rpm, p_amb_hPa, oat_K, tas_mps, beta_deg, prop_rpm
+    ) * 1000.0 / eta_gb
 
     t_inf = oat_K
     egt_mean_K = sum(egt_C) / len(egt_C) + 273.15
