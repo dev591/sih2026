@@ -14,6 +14,7 @@
  * That is the pitch compressed, not the pitch discarded.
  */
 
+import { useState } from 'react';
 import { EngineSlot } from './EngineSlot';
 import {
   DiagnosisPanel, HealthParamsPanel, LimitsPanel, MissionPanel,
@@ -25,7 +26,28 @@ import { FaultConsole } from './FaultConsole';
 import { MissionMap } from './MissionMap';
 import { EdgeDrawer, EdgeTab } from './EdgeDrawer';
 import { useCurrentTick, useMission } from '../state/missionStore';
-import { FAULT_LABELS } from '../types/telemetry';
+import { FAULT_LABELS, residualRow } from '../types/telemetry';
+
+/**
+ * Plain-English name for each of the 11 parity residuals, in the same order
+ * as `residualRow()`. ExplainDrawer.tsx has the real version of this (ρ
+ * symbols, the full incidence matrix) for someone who wants the engineering
+ * detail — this is the same underlying numbers, translated for someone who
+ * has never seen a residual before and just wants "what evidence, exactly."
+ */
+const PLAIN_RESIDUAL = [
+  'the incoming air, measured two independent ways',
+  'the fuel-to-air ratio',
+  'the air-restriction check',
+  "the engine's overall energy balance (fuel in vs. heat and work out)",
+  'the power produced vs. what the propeller is actually absorbing',
+  "cylinder 1's temperature, compared to the other three",
+  "cylinder 2's temperature, compared to the other three",
+  "cylinder 3's temperature, compared to the other three",
+  "cylinder 4's temperature, compared to the other three",
+  'oil pressure',
+  'how smoothly the crankshaft is turning',
+];
 
 /**
  * The two-up contrast. Left is what a conventional system sees; right is what
@@ -117,6 +139,131 @@ function VerdictCard() {
   );
 }
 
+/**
+ * The Mission drawer's headline, in plain English, before any of the
+ * fourteen panels below it. A judge who has never seen a Monte Carlo
+ * reliability number needs "Problem: sensor, not the engine — keep flying"
+ * and "Recommendation: continue, 99%" before "P(complete) M=200" means
+ * anything to them. Everything below stays available — nothing is removed,
+ * it's just not the first thing they see.
+ */
+export function MissionSummary() {
+  const { health } = useCurrentTick();
+  const { diagnosis, mission, rul, rho } = health;
+  const top = diagnosis.top[0];
+  const healthy = top.fault === 'healthy';
+  const problemTone = healthy ? 'ok' : diagnosis.is_sensor_fault ? 'sensor' : 'alert';
+
+  // The evidence chain, in plain English: which real measurements moved,
+  // by how much, and what that combination implies. This is the same
+  // residual vector ExplainDrawer.tsx uses for its ρ-symbol version — same
+  // live numbers, just narrated as "this, this, this → therefore" instead
+  // of a signature-matrix table.
+  const values = residualRow(rho);
+  const ranked = values
+    .map((v, i) => ({ i, v: v ?? 0, available: v !== null }))
+    .filter((r) => r.available)
+    .sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  const moved = ranked.filter((r) => Math.abs(r.v) > 1.5).slice(0, 3);
+  const quietCount = ranked.length - moved.length;
+
+  const recLabel =
+    mission.recommended === 'continue' ? 'Continue as planned'
+      : mission.recommended === 'derate' ? `Reduce power to ${mission.recommended_power_pct.toFixed(0)}%`
+      : 'Return to base';
+  const recP =
+    mission.recommended === 'continue' ? mission.p_complete_continue
+      : mission.recommended === 'derate' ? mission.p_complete_derate
+      : mission.p_complete_rtb;
+  const recTone = mission.recommended === 'continue' ? 'ok' : 'warn';
+
+  return (
+    <div className="mission-summary">
+      <div className="mission-summary-row">
+        <span className="mission-summary-label">Problem</span>
+        <span className={`mission-summary-value tone-${problemTone}`}>
+          {healthy ? 'None — engine is healthy' : FAULT_LABELS[top.fault]}
+          {top.cylinder != null && <span className="mission-summary-cyl"> · cylinder {top.cylinder + 1}</span>}
+        </span>
+        {!healthy && (
+          <span className="mission-summary-note">
+            {diagnosis.is_sensor_fault
+              ? "It's a faulty sensor, not the engine — safe to keep flying."
+              : `${(top.p * 100).toFixed(0)}% confident, from the engine's own measurements.`}
+          </span>
+        )}
+      </div>
+
+      {!healthy && moved.length > 0 && (
+        <div className="mission-summary-row">
+          <span className="mission-summary-label">Why we think this</span>
+          <ul className="why-list">
+            {moved.map((r) => (
+              <li key={r.i}>
+                {PLAIN_RESIDUAL[r.i]} is {r.v > 0 ? 'higher' : 'lower'} than it
+                should be right now
+              </li>
+            ))}
+            {quietCount > 0 && (
+              <li className="why-quiet">
+                {quietCount} other check{quietCount === 1 ? '' : 's'}{' '}
+                {quietCount === 1 ? 'is' : 'are'} still normal
+              </li>
+            )}
+          </ul>
+          <span className="mission-summary-note why-conclusion">
+            →{' '}
+            {diagnosis.is_sensor_fault
+              ? "Since everything else checks out, this points to a faulty sensor, not the engine itself."
+              : 'Since these moved together in a matching pattern, this points to a real engine problem.'}
+          </span>
+        </div>
+      )}
+
+      <div className="mission-summary-row">
+        <span className="mission-summary-label">Recommendation</span>
+        <span className={`mission-summary-value tone-${recTone}`}>{recLabel}</span>
+        <span className="mission-summary-note">
+          {(recP * 100).toFixed(0)}% chance of completing the mission this way
+        </span>
+      </div>
+
+      {!healthy && rul.component !== 'none' && (
+        <div className="mission-summary-row">
+          <span className="mission-summary-label">Time before this needs attention</span>
+          <span className="mission-summary-value">{rul.reported_h.toFixed(1)} hours</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Everything below the plain-English summary — the same panels as before,
+ *  just behind one click instead of first on screen. */
+function MissionDrawerContent() {
+  const [showDetails, setShowDetails] = useState(false);
+  return (
+    <>
+      <MissionSummary />
+      <button
+        type="button"
+        className="mission-details-toggle"
+        onClick={() => setShowDetails((v) => !v)}
+      >
+        {showDetails ? 'Hide details & reasoning ▴' : 'View details & reasoning ▾'}
+      </button>
+      {showDetails && (
+        <>
+          <MissionPanel />
+          <MissionMap />
+          <RulPanel />
+          <CrossEnginePanel />
+        </>
+      )}
+    </>
+  );
+}
+
 export function SimpleView() {
   const { health } = useCurrentTick();
   const { diagnosis, limits_state } = health;
@@ -157,15 +304,8 @@ export function SimpleView() {
         )}
       </EdgeDrawer>
 
-      <EdgeDrawer id="mission" side="right" title="Mission" subtitle="reliability · route · RUL">
-        {() => (
-          <>
-            <MissionPanel />
-            <MissionMap />
-            <RulPanel />
-            <CrossEnginePanel />
-          </>
-        )}
+      <EdgeDrawer id="mission" side="right" title="Mission" subtitle="what's wrong · what to do">
+        {() => <MissionDrawerContent />}
       </EdgeDrawer>
 
       <EdgeDrawer id="trends" side="bottom" title="Trends & residuals" subtitle="measured vs twin">

@@ -38,6 +38,7 @@ export function StripChart({
   title, subtitle, pick, pickPredicted, unit, height = 150,
 }: StripProps) {
   const holder = useRef<HTMLDivElement>(null);
+  const tooltip = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
 
   // The accessors are inline arrows at the call sites, so they get a fresh
@@ -51,6 +52,19 @@ export function StripChart({
 
   /** Fractional "now", in mission seconds. The x scale is pinned to it. */
   const xNow = useRef(0);
+
+  // Live numeric readout next to each legend swatch — a judge who has never
+  // seen this dashboard before can match "the orange line" to "cylinder 2:
+  // 612°C" without first learning to read a strip chart. Updated imperatively
+  // in the same draw loop as the plot, not via React state (see the note on
+  // buildData/uPlot above — this file deliberately re-renders nothing per
+  // frame).
+  const valueRefs = useRef<(HTMLSpanElement | null)[]>(Array(N_CYL).fill(null));
+  const predValueRef = useRef<HTMLSpanElement | null>(null);
+  const latest = useRef<{ cyl: number[]; twin: number | null }>({
+    cyl: Array(N_CYL).fill(NaN),
+    twin: null,
+  });
 
   /**
    * Build the visible window, with a fractional leading edge.
@@ -93,6 +107,8 @@ export function StripChart({
     }
 
     xNow.current = xs[xs.length - 1] ?? 0;
+    for (let c = 0; c < N_CYL; c++) latest.current.cyl[c] = series[c][series[c].length - 1] ?? NaN;
+    latest.current.twin = hasPred ? (series[N_CYL][series[N_CYL].length - 1] ?? null) : null;
     return [xs, ...series] as uPlot.AlignedData;
   };
 
@@ -123,7 +139,51 @@ export function StripChart({
       height,
       padding: [8, 10, 0, 0],
       legend: { show: false },
-      cursor: { drag: { x: false, y: false } },
+      cursor: {
+        drag: { x: false, y: false },
+        points: { size: 7, width: 2, stroke: C.bg },
+      },
+      hooks: {
+        // A judge who has never seen a strip chart before gets nothing from
+        // four unlabelled colored lines. Pointing at any moment now reads
+        // every cylinder's exact value at once — the tooltip is the real
+        // legend at that point, the swatch legend below is just the index.
+        setCursor: [
+          (u) => {
+            const tt = tooltip.current;
+            if (!tt) return;
+            const { left, top, idx } = u.cursor;
+            if (idx == null || left == null || left < 0) {
+              tt.style.display = 'none';
+              return;
+            }
+            const rows: string[] = [];
+            for (let c = 0; c < N_CYL; c++) {
+              const v = u.data[c + 1][idx] as number | null | undefined;
+              rows.push(
+                `<div class="chart-tooltip-row"><span class="chart-tooltip-swatch" ` +
+                `style="background:${CYL_COLOURS[c]}"></span>Cylinder ${c + 1}: ` +
+                `${v == null ? '—' : Math.round(v)}${unit}</div>`,
+              );
+            }
+            if (hasPred) {
+              const v = u.data[N_CYL + 1][idx] as number | null | undefined;
+              rows.push(
+                `<div class="chart-tooltip-row"><span class="chart-tooltip-swatch" ` +
+                `style="background:${C.twin}"></span>Twin (expected): ` +
+                `${v == null ? '—' : Math.round(v)}${unit}</div>`,
+              );
+            }
+            const xv = u.data[0][idx] as number | undefined;
+            tt.innerHTML =
+              `<div class="chart-tooltip-time">t = ${xv?.toFixed(0) ?? '—'}s</div>` +
+              rows.join('');
+            tt.style.display = 'block';
+            tt.style.left = `${(left ?? 0) + 14}px`;
+            tt.style.top = `${top ?? 0}px`;
+          },
+        ],
+      },
       scales: {
         x: {
           time: false,
@@ -190,6 +250,17 @@ export function StripChart({
     let raf = requestAnimationFrame(function draw() {
       raf = requestAnimationFrame(draw);
       plot.current?.setData(buildData());
+      for (let c = 0; c < N_CYL; c++) {
+        const el = valueRefs.current[c];
+        if (el) {
+          const v = latest.current.cyl[c];
+          el.textContent = Number.isFinite(v) ? v.toFixed(0) : '—';
+        }
+      }
+      if (predValueRef.current) {
+        const v = latest.current.twin;
+        predValueRef.current.textContent = v != null && Number.isFinite(v) ? v.toFixed(0) : '—';
+      }
     });
 
     return () => {
@@ -203,18 +274,28 @@ export function StripChart({
 
   return (
     <Panel title={title} subtitle={subtitle ?? unit}>
-      <div ref={holder} className="chart-holder" />
+      <div className="chart-plot-wrap">
+        <div ref={holder} className="chart-holder" />
+        <div ref={tooltip} className="chart-tooltip" style={{ display: 'none' }} />
+      </div>
       <div className="chart-legend">
         {Array.from({ length: N_CYL }, (_, i) => (
           <span key={i} className="legend-item">
             <span className="legend-swatch" style={{ background: CYL_COLOURS[i] }} />
-            cyl {i + 1}
+            <span className="legend-label">Cylinder {i + 1}</span>
+            <span
+              className="legend-value"
+              ref={(el) => { valueRefs.current[i] = el; }}
+            >
+              —
+            </span>
           </span>
         ))}
         {pickPredicted && (
           <span className="legend-item">
             <span className="legend-swatch legend-dash" />
-            twin prediction
+            <span className="legend-label">Twin (expected)</span>
+            <span className="legend-value" ref={predValueRef}>—</span>
           </span>
         )}
         <span className="legend-unit">{unit}</span>

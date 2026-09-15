@@ -308,6 +308,32 @@ body {
   font-family: var(--mono); font-size: 9px; color: var(--text-dimr);
 }
 
+/* ---------------- mission summary (plain-English headline) ---------------- */
+.mission-summary {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 14px; margin-bottom: 10px;
+  background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px;
+}
+.mission-summary-row { display: flex; flex-direction: column; gap: 3px; }
+.mission-summary-label {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.mission-summary-value { font-size: 18px; font-weight: 700; line-height: 1.2; }
+.mission-summary-cyl { font-size: 13px; font-weight: 500; color: var(--text-dim); }
+.mission-summary-note { font-size: 12px; color: var(--text-dim); }
+.why-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; padding: 0 0 0 18px; }
+.why-list li { font-size: 12.5px; color: var(--text); line-height: 1.4; }
+.why-list li.why-quiet { color: var(--text-dim); font-style: italic; }
+.why-conclusion { display: block; margin-top: 6px; font-weight: 600; color: var(--text); }
+.mission-details-toggle {
+  width: 100%; margin-bottom: 10px; padding: 8px 10px;
+  font-size: 12px; font-weight: 600; color: var(--text-dim);
+  background: transparent; border: 1px dashed var(--line-2); border-radius: 6px;
+  cursor: pointer;
+}
+.mission-details-toggle:hover { color: var(--text); border-color: var(--line); }
+
 /* ---------------- mission ---------------- */
 .opt-list { display: flex; flex-direction: column; gap: 4px; }
 .opt {
@@ -351,19 +377,51 @@ body {
 .cyl-chip-e { font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
 
 /* ---------------- charts ---------------- */
+.chart-plot-wrap { position: relative; width: 100%; }
 .chart-holder { width: 100%; }
+/* Bigger/bolder than the original 11px muted-gray legend — a judge seeing
+   this dashboard for the first time needs to match "that line" to "cylinder
+   2" from across a room, not read fine print. Swatch still carries the color
+   identity; label/value stay in text tokens per the dataviz house rule
+   (color-as-identity, never color-as-text) so contrast holds either way. */
 .chart-legend {
-  display: flex; align-items: center; gap: 14px; margin-top: 6px;
-  font-size: 11px; color: var(--text-dim);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 10px;
+  font-size: 13px; color: var(--text-dim);
 }
-.legend-item { display: flex; align-items: center; gap: 5px; }
-.legend-swatch { width: 12px; height: 2.5px; border-radius: 1px; }
+.legend-item { display: flex; align-items: center; gap: 7px; }
+.legend-swatch { width: 20px; height: 4px; border-radius: 2px; flex: none; }
 .legend-dash {
-  background: repeating-linear-gradient(90deg, var(--twin) 0 3px, transparent 3px 6px);
+  background: repeating-linear-gradient(90deg, var(--twin) 0 4px, transparent 4px 8px);
 }
-.legend-unit { margin-left: auto; font-family: var(--mono); }
+.legend-label { color: var(--text); font-weight: 600; }
+.legend-value {
+  font-family: var(--mono); font-weight: 700; color: var(--text);
+  min-width: 3.2ch; text-align: right;
+}
+.legend-unit { margin-left: auto; font-family: var(--mono); color: var(--text-dim); }
 
 .uplot, .u-wrap { font-family: var(--mono) !important; }
+
+/* Hover crosshair + tooltip (uPlot's built-in cursor points, styled) — lets
+   a judge point at any moment on the chart and read every cylinder's exact
+   value at once, instead of having to already know how to read a strip
+   chart to get anything out of it. */
+.u-cursor-pt {
+  border: 2px solid var(--bg) !important;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+}
+.chart-tooltip {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 6px 9px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  white-space: nowrap;
+}
+.chart-tooltip-row { display: flex; align-items: center; gap: 6px; }
+.chart-tooltip-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.chart-tooltip-time {
+  font-size: 10px; color: var(--text-dim); margin-bottom: 3px;
+}
 
 /* ---------------- scrubber ---------------- */
 .scrubber {

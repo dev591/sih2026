@@ -11,7 +11,7 @@ import { BeatBar, Scrubber } from './components/Scrubber';
 import { ExplainDrawer } from './components/ExplainDrawer';
 import { FlightReport } from './components/FlightReport';
 import { EngineSlot } from './components/EngineSlot';
-import { SimpleView } from './components/SimpleView';
+import { SimpleView, MissionSummary } from './components/SimpleView';
 import { useCurrentTick, useMission } from './state/missionStore';
 import { useEngineSlot } from './state/engineSlot';
 import { ENGINES } from './config/engines';
@@ -210,6 +210,15 @@ function ExpertGrid() {
       <div className="col col-right">
         <MissionPanel />
         <MissionMap />
+        <section className="panel">
+          <header className="panel-head">
+            <span className="panel-title">Plain-English summary</span>
+            <span className="panel-sub">same numbers, in words</span>
+          </header>
+          <div className="panel-body">
+            <MissionSummary />
+          </div>
+        </section>
         <ResidualHeatmap />
         <HealthParamsPanel />
         <VirtualSensorPanel />
