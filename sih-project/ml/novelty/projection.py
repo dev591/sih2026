@@ -187,7 +187,11 @@ class NoveltyResult:
             0.0, 1.0
         ))
         confidence = 1.0 - self.index * significance
-        exceeded = (self.index > threshold) and (significance > 0.5)
+        # bool(...): self.index is a numpy scalar; `and` short-circuits on the
+        # first falsy operand and returns it AS-IS rather than coercing to a
+        # Python bool, so a numpy.bool_ leaks straight into the JSON frame —
+        # same failure mode fixed in ml/m3_rul/model.py's heads_disagree.
+        exceeded = bool((self.index > threshold) and (significance > 0.5))
 
         return {
             "novelty": {

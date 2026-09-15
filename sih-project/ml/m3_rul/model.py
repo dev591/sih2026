@@ -118,7 +118,10 @@ def rul_report(
         heads_disagree = False
     else:
         reported_h = min(p50, physics_h)
-        heads_disagree = abs(p50 - physics_h) > max(interval_half * threshold_disagree, 0.5)
+        # bool(...): p50/physics_h may be numpy scalars (from a .numpy() model
+        # output), whose comparison yields numpy.bool — not JSON serializable
+        # and it crashed every websocket frame once the two heads disagreed.
+        heads_disagree = bool(abs(p50 - physics_h) > max(interval_half * threshold_disagree, 0.5))
 
     return {
         "component":      component,

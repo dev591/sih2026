@@ -19,6 +19,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -175,11 +176,25 @@ def _anomaly_score(rho: list) -> float:
     return float(min(1.0, rms / 10.0))
 
 
+_SENSOR_FAULT_KEYS = {"chtSensor", "egtSensor", "mapSensor", "lambdaSensor"}
+
+
 def _mission_probabilities(fault_config: dict, t: float) -> tuple[float, float]:
-    """Return (p_continue, p_derate) based on current fault severity."""
+    """Return (p_continue, p_derate) based on current fault severity.
+
+    Sensor faults are deliberately excluded from the severity sum: a
+    thermocouple lying about its own reading costs nothing mechanically, and
+    is the whole point of the demo's sensor-drift beat ("the system correctly
+    tells the difference and doesn't abort the mission over a $40 part").
+    Before this fix, `rate` was summed directly regardless of units — a
+    sensor fault's rate is in degC/min (~10-200), a component fault's is a
+    %/min fraction (~0.01-0.12) — so a sensor drift alone floored p_continue
+    to 0.35 within seconds, contradicting the diagnosis panel's own
+    is_sensor_fault flag on the same tick.
+    """
     severity = 0.0
     for name, spec in fault_config.items():
-        if not spec or name == "warmAirMass":
+        if not spec or name == "warmAirMass" or name in _SENSOR_FAULT_KEYS:
             continue
         start_t = float(spec.get("startT", 0.0))
         rate    = float(spec.get("rate",   0.0))
@@ -189,6 +204,40 @@ def _mission_probabilities(fault_config: dict, t: float) -> tuple[float, float]:
     p_cont  = max(0.35, 0.99 - severity * 1.5)
     p_derate = max(0.70, 0.995 - severity * 0.35)
     return p_cont, p_derate
+
+
+_json_safe_warned = False
+
+
+def _json_safe(obj):
+    """
+    Recursively coerce numpy scalars to native Python types.
+
+    Safety net, not a substitute for fixing the source: `numpy.bool_`/
+    `numpy.bool` (and other numpy scalar types) are not JSON-serializable and
+    crash `websocket.send_json` outright, killing the connection mid-demo
+    with no client-visible error beyond an abrupt disconnect. Found and fixed
+    at the source twice already (ml/m3_rul/model.py's heads_disagree,
+    ml/novelty/projection.py's exceeded) — this catches any repeat of that
+    class of bug in ml.run()'s output (BE-2's models, outside this file's
+    direct control) before it can take the live demo down.
+    """
+    global _json_safe_warned
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        if not _json_safe_warned:
+            print("[main] _json_safe: coerced a numpy bool that reached the "
+                  "frame boundary — fix the source, this is a safety net")
+            _json_safe_warned = True
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    return obj
 
 
 def _diagnosis(fault_config: dict, anomaly_score: float, threshold: float, t: float) -> dict:
@@ -676,13 +725,13 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     except Exception as exc:
                         print(f"[main] inference failed, serving stub health: {exc}")
 
-                await websocket.send_json({
+                await websocket.send_json(_json_safe({
                     "slow":      slow,
                     "fast":      fast,
                     "health":    health,
                     "predicted": predicted,
                     "slowB":     slowB,
-                })
+                }))
                 await asyncio.sleep(1.0)
 
         except (WebSocketDisconnect, RuntimeError):

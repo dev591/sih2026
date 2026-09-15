@@ -101,6 +101,15 @@ class InferencePipeline:
         nd = _load_json(weights_dir / "novelty_report.json", {"threshold_99p5": 0.42})
         self.novelty_threshold = float(nd.get("threshold_99p5", 0.42))
 
+        # `reset()` is what actually creates self.ukf and clears rolling
+        # state. It was previously only called in response to a client's
+        # {"type": "reset"} websocket message, which meant a freshly
+        # constructed InferencePipeline had no self.ukf at all — every
+        # run() call raised AttributeError until a client happened to send
+        # reset, and main.py silently caught that and served the physics-
+        # rule stub instead, with no visible sign anything was wrong.
+        self.reset()
+
     def reset(self) -> None:
         """
         Clear rolling state so a cleared fault reads as healthy on the NEXT
