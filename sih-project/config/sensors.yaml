@@ -419,6 +419,64 @@ channels:
       constant lives in the plant, not here.
 
 # ---------------------------------------------------------------------------
+# COOLING AND CHARGE AIR — added with the liquid cooling loop and intercooler.
+# Appended after every existing channel, same reason as the drivetrain block.
+# ---------------------------------------------------------------------------
+  coolant_temp_C:
+    sensor: ntc_thermistor
+    provenance: assumed
+    units: degC
+    range: [-40.0, 140.0]
+    tolerance_degC: 1.5
+    noise_sigma: 0.15
+    tau_s: 3.0                    # assumed — probe in the thermostat housing
+    averaging_window_n: 16
+    dominant_error: tolerance
+    notes: >
+      THE production cooling channel on a liquid-cooled aero-diesel, and a
+      certificated limit on the comparable engine (105 degC, EASA TCDS E.200).
+      Per-cylinder CHT stays flight-test instrumentation; this is what a
+      production FADEC actually watches. The loop's own thermal time constant
+      (~45 s) lives in the plant, not here.
+
+  comp_out_T_K:
+    sensor: ntc_thermistor
+    provenance: assumed
+    units: K
+    range: [220.0, 500.0]
+    tolerance_degC: 2.0
+    noise_sigma: 0.4
+    tau_s: 1.0                    # assumed — bead in a hot, fast air stream
+    averaging_window_n: 8
+    dominant_error: tolerance
+    notes: >
+      Compressor DELIVERY temperature, upstream of the intercooler. Until the
+      intercooler existed this field was emitted as a copy of iat_K (main.py
+      called it "DERIVED, not sensed"); with a charge-air cooler in the model
+      the two are genuinely different temperatures, so this becomes a real
+      channel and the intercooler's effectiveness is observable as the drop
+      between them.
+
+  comp_out_p_hPa:
+    sensor: piezoresistive_mems
+    provenance: assumed
+    units: hPa
+    range: [200.0, 3000.0]
+    accuracy_frac_fs: 0.015
+    offset_frac_fs: 0.004
+    noise_sigma: 1.2
+    tau_s: 0.002
+    averaging_window_n: 4
+    dominant_error: sensor_accuracy
+    notes: >
+      Compressor delivery pressure, upstream of the intercooler core's pressure
+      drop. Parity Path 2 evaluates the compressor map at ITS OWN outlet, so
+      with an intercooler modelled it should read this rather than manifold
+      pressure — which also removes the last shared sensor between Path 1 and
+      Path 2 (they now share none: Path 1 is MAP/IAT/crank speed, Path 2 is
+      turbo speed / comp_out_p / p_amb / OAT).
+
+# ---------------------------------------------------------------------------
 # FAILURE MODES — what a transducer actually does when it fails
 # ---------------------------------------------------------------------------
 # Today drift/offset is the ONLY modelled sensor failure, and it ramps

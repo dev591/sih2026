@@ -13,7 +13,8 @@ behaviourally identical:
     FaultConfig {
         injector?:    FaultSpec   rate = fraction of C_d lost per minute
         turbo?:       FaultSpec   rate = fraction of eta_c lost per minute
-        cooling?:     FaultSpec   rate = fraction of hA lost per minute
+        cooling?:     FaultSpec   rate = fraction of RADIATOR effectiveness lost per minute
+        coolantPump?: FaultSpec   rate = fraction of coolant flow lost per minute
         bearing?:     FaultSpec   rate = friction fraction gained per minute
         chtSensor?:   FaultSpec   rate = degC per minute of bias
         egtSensor?:   FaultSpec   rate = degC per minute of bias
@@ -43,7 +44,8 @@ WARM_AIR_MASS_OFFSET_K = 15.0
 _CLAMPS: dict[str, tuple[float, float]] = {
     "injector": (0.4,  1.0),   # cd_inj lower bound
     "turbo":    (0.55, 1.0),   # eta_c_scale lower bound
-    "cooling":  (0.5,  1.0),   # hA_scale lower bound
+    "cooling":  (0.5,  1.0),   # rad_eff_scale lower bound (radiator fouling)
+    "coolantPump": (0.4, 1.0), # cool_pump_scale lower bound
     "bearing":  (1.0,  2.2),   # f_fric_scale upper bound
     "ringWear": (0.6,  1.0),   # eta_v_scale lower bound
     "oilLeak":  (0.2,  1.0),   # oil_pump_scale lower bound
@@ -58,6 +60,7 @@ def apply_fault_config(
     sensor_biases: dict,
     isa_offset_K: float,
     altitude_ft: float,
+    liquid_cooled: bool = True,
 ) -> tuple[dict, dict, float]:
     """
     Apply the current fault_config at mission time t.
@@ -70,6 +73,9 @@ def apply_fault_config(
     sensor_biases   : healthy sensor bias dict (never mutated in-place)
     isa_offset_K    : current ISA temperature offset [K]
     altitude_ft     : current altitude [ft] for pressure-dependent faults
+    liquid_cooled   : whether the profile carries a coolant loop; decides
+                      whether `cooling` means radiator fouling or (on the
+                      air-cooled Rotax profile) the old conductance scale
 
     Returns
     -------
@@ -106,8 +112,22 @@ def apply_fault_config(
             params["eta_c_scale"] = max(lo, 1.0 - sev)
 
         elif fault_name == "cooling":
+            # A blocked or fouled radiator core, which is the common real
+            # cooling failure. It acts on the RADIATOR, so coolant temperature
+            # rises and drags head temperature with it — where the old
+            # `hA_scale` version could only move head temperature, with the
+            # coolant pinned at a constant. On a profile with no coolant loop
+            # (Rotax) it still falls back to hA_scale, so that engine's
+            # behaviour is unchanged.
             lo, _ = _CLAMPS["cooling"]
-            params["hA_scale"] = max(lo, 1.0 - sev)
+            if liquid_cooled:
+                params["rad_eff_scale"] = max(lo, 1.0 - sev)
+            else:
+                params["hA_scale"] = max(lo, 1.0 - sev)
+
+        elif fault_name == "coolantPump":
+            lo, _ = _CLAMPS["coolantPump"]
+            params["cool_pump_scale"] = max(lo, 1.0 - sev)
 
         elif fault_name == "bearing":
             _, hi = _CLAMPS["bearing"]

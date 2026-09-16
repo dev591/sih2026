@@ -67,9 +67,17 @@ def compute_residuals(
     m_sd   = path1_speed_density(
         cfg, measured["map_hPa"], measured["iat_K"], measured["rpm"]
     )
+    # Compressor delivery pressure is a real, separate sensor ONLY where the
+    # installation has an intercooler between the compressor and the manifold.
+    # Without one (the Rotax transfer profile) delivery pressure IS manifold
+    # pressure, and feeding that channel in would inject its transducer's own
+    # offset into rho1 for no physical reason — measured: it moved Rotax's
+    # healthy parity transfer from 4.4e-11 to 7.2e-03.
+    has_intercooler = bool(cfg.get("mvem", {}).get("cooling", {}).get("intercooler"))
     m_comp = path2_compressor_map(
         cfg, measured["turbo_rpm"], measured["map_hPa"],
         measured["p_amb_hPa"], measured["oat_K"],
+        measured.get("comp_out_p_hPa") if has_intercooler else None,
     )
     # Normalise on the induction-side estimate: it is the better-conditioned of
     # the two (the compressor estimate collapses toward zero past the ellipse,
@@ -126,6 +134,7 @@ def compute_residuals(
         measured["egt_C"], measured["cht_C"],
         measured["p_amb_hPa"], measured["oat_K"],
         tas_in, beta_in, nprop_in,
+        measured.get("coolant_temp_C"),
     )
     chem_power_kw = measured["fuel_flow_kgps"] * cfg["fuel"]["Q_LHV_J_per_kg"] / 1000.0
     rho4 = imbalance_kw / max(chem_power_kw, 1e-6)

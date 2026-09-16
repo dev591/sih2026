@@ -76,6 +76,8 @@ def collect_raw_rho(cfg: dict) -> np.ndarray:
         "fuel_rail_scale": 1.0,
         "misfire_prob":  [0.0] * cfg["geometry"]["cylinders"],
         "detonation_sev": [0.0] * cfg["geometry"]["cylinders"],
+        "rad_eff_scale": 1.0,
+        "cool_pump_scale": 1.0,
     }
     samples = []
 

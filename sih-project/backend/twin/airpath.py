@@ -164,7 +164,8 @@ def path1_speed_density(cfg: dict, map_hPa: float, iat_K: float,
 
 
 def path2_compressor_map(cfg: dict, turbo_rpm: float, map_hPa: float,
-                         p_amb_hPa: float, oat_K: float) -> float:
+                         p_amb_hPa: float, oat_K: float,
+                         comp_out_p_hPa: float | None = None) -> float:
     """
     Sensors: turbo shaft speed, MAP, ambient pressure, OAT.
     Model: the compressor map.
@@ -177,7 +178,13 @@ def path2_compressor_map(cfg: dict, turbo_rpm: float, map_hPa: float,
     """
     w_tc = turbo_rpm * 2.0 * math.pi / 60.0
     p01 = max(p_amb_hPa, 1.0) * 100.0
-    pi_c = (map_hPa * 100.0) / p01
+    # With an intercooler in the model, the compressor's own delivery pressure
+    # is a separate sensed channel and Path 2 uses it — which leaves Path 1 and
+    # Path 2 sharing NO sensor at all (Path 1: MAP, IAT, crank speed; Path 2:
+    # turbo speed, comp_out_p, p_amb, OAT). Without that channel it falls back
+    # to manifold pressure, as before.
+    p_out = (comp_out_p_hPa if comp_out_p_hPa is not None else map_hPa) * 100.0
+    pi_c = p_out / p01
     mdot_c, _ = compressor_ellipse(cfg, w_tc, pi_c, p01, max(oat_K, 1.0))
     return mdot_c
 
@@ -318,7 +325,8 @@ def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
                       p_amb_hPa: float, oat_K: float,
                       tas_mps: float | None = None,
                       beta_deg: float | None = None,
-                      prop_rpm: float | None = None) -> float:
+                      prop_rpm: float | None = None,
+                      coolant_temp_C: float | None = None) -> float:
     """
     Raw energy imbalance in kW (not yet normalised by mdot_f*Q_LHV — the
     caller does that, matching the design's stated criterion).
@@ -334,9 +342,17 @@ def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
     m = cfg.get("mvem", cfg)
     q_lhv = cfg["fuel"]["Q_LHV_J_per_kg"]
     cp_ex = m.get("cp_exhaust_J_per_kgK", 1150.0)
-    fin_area = m["thermal"]["fin_area_m2"]
-    h_head = m["thermal"]["head_htc_W_per_m2K"]
-    t_cool = m["thermal"]["coolant_temp_K"]
+    # Head-to-coolant conductance, and the sink temperature to reject into.
+    # On a liquid-cooled profile the sink is the MEASURED coolant temperature —
+    # the first-law check should use the instrument, not a config constant that
+    # cannot rise when the radiator blocks.
+    cool = m.get("cooling")
+    if cool and cool.get("type") == "liquid":
+        ua_head = cool["head_to_coolant_UA_W_per_K"]
+    else:
+        ua_head = m["thermal"]["head_htc_W_per_m2K"] * m["thermal"]["fin_area_m2"]
+    t_cool = (coolant_temp_C + 273.15) if coolant_temp_C is not None \
+        else m["thermal"]["coolant_temp_K"]
 
     m_a = path1_speed_density(cfg, map_hPa, iat_K, rpm)
     if tas_mps is None:
@@ -352,7 +368,7 @@ def energy_closure_kw(cfg: dict, fuel_flow_kgps: float, rpm: float,
     egt_mean_K = sum(egt_C) / len(egt_C) + 273.15
     exhaust_enthalpy_w = (m_a + fuel_flow_kgps) * cp_ex * (egt_mean_K - t_inf)
 
-    heat_rejection_w = sum(h_head * fin_area * (t + 273.15 - t_cool) for t in cht_C)
+    heat_rejection_w = sum(ua_head * (t + 273.15 - t_cool) for t in cht_C)
 
     chem_power_w = fuel_flow_kgps * q_lhv
     imbalance_w = chem_power_w - p_brake_w - exhaust_enthalpy_w - heat_rejection_w

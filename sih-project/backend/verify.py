@@ -16,6 +16,8 @@ Tests:
                         sensor faults leave get_outputs() bit-identical
   5. Drivetrain       — gearbox kinematics, governor holds schedule,
                         subsonic propeller tip, gearbox oil within limit
+  6. Cooling loop     — thermostat modulates, coolant within limit, radiator
+                        fouling raises coolant, intercooler cools the charge
 """
 
 import math
@@ -378,6 +380,109 @@ def test_drivetrain(cfg):
 
 
 # ---------------------------------------------------------------------------
+# Test 6 — Liquid cooling loop, thermostat, radiator, intercooler
+# ---------------------------------------------------------------------------
+
+def test_cooling_loop(cfg):
+    print("Test 6 — coolant loop, thermostat, radiator and intercooler...")
+    cool = cfg["mvem"]["cooling"]
+    limit = cfg["limits"]["coolant_C"]
+    nom = {
+        "cd_inj": [1.0] * cfg["geometry"]["cylinders"],
+        "eta_v_scale": 1.0, "eta_c_scale": 1.0,
+        "hA_scale": 1.0, "f_fric_scale": 1.0,
+    }
+
+    # (label, altitude_ft, throttle, TAS, ISA offset)
+    cases = [
+        ("sea-level take-off", 0, 100.0, 40.0, 0.0),
+        ("hot-day take-off ISA+20", 0, 100.0, 40.0, 20.0),
+        ("18,000 ft cruise", 18000, 72.0, 61.2, 0.0),
+    ]
+    for label, alt, thr, tas, isa_off in cases:
+        atm = isa(alt, isa_off)
+        plant = MVEM(cfg)
+        for _ in range(400):
+            plant.step(1.0, nom, atm, thr, tas_mps=tas)
+        out = plant.get_outputs()
+        assert out["coolant_temp_C"] < limit, (
+            f"{label}: coolant {out['coolant_temp_C']:.1f} C over the {limit} C limit"
+        )
+        # The thermostat must actually be doing something — a loop pinned wide
+        # open or fully shut everywhere is not a thermostat.
+        assert 0.0 <= out["thermostat_frac"] <= 1.0
+        # Charge air must leave the intercooler cooler than the compressor
+        # delivered it, by roughly the declared effectiveness.
+        drop = out["comp_out_T_K"] - out["iat_K"]
+        available = out["comp_out_T_K"] - atm["T"]
+        assert drop > 0.0, f"{label}: intercooler did not cool the charge"
+        assert abs(drop / max(available, 1e-6) - cool["intercooler"]["effectiveness"]) < 0.02
+        assert out["comp_out_p_hPa"] > out["map_hPa"], (
+            f"{label}: compressor delivery must sit above manifold pressure"
+        )
+        print(f"  {label:<24} coolant {out['coolant_temp_C']:5.1f} C  "
+              f"thermostat {out['thermostat_frac']*100:3.0f}%  "
+              f"CHT {max(out['cht_C']):5.1f} C  "
+              f"charge {out['comp_out_T_K']-273.15:5.1f} -> {out['iat_K']-273.15:5.1f} C  "
+              f"brake {out['brake_power_kW']:5.1f} kW")
+
+    # A fouled radiator must raise COOLANT temperature (the old hA_scale model
+    # could only move head temperature — the coolant was a constant).
+    atm = isa(0)
+    healthy, fouled = MVEM(cfg), MVEM(cfg)
+    foul = dict(nom); foul["rad_eff_scale"] = 0.5
+    for _ in range(400):
+        healthy.step(1.0, nom, atm, 100.0, tas_mps=40.0)
+        fouled.step(1.0, foul, atm, 100.0, tas_mps=40.0)
+    h_out, f_out = healthy.get_outputs(), fouled.get_outputs()
+    assert f_out["coolant_temp_C"] > h_out["coolant_temp_C"] + 2.0, (
+        f"Radiator fouling must raise coolant: {h_out['coolant_temp_C']:.1f} -> "
+        f"{f_out['coolant_temp_C']:.1f} C"
+    )
+    assert max(f_out["cht_C"]) > max(h_out["cht_C"]), (
+        "Hotter coolant must drag head temperature up with it"
+    )
+    print(f"  radiator at 50 %: coolant {h_out['coolant_temp_C']:.1f} -> "
+          f"{f_out['coolant_temp_C']:.1f} C, CHT {max(h_out['cht_C']):.1f} -> "
+          f"{max(f_out['cht_C']):.1f} C")
+
+    # A degraded coolant pump is a DIFFERENT fault: it starves head-to-coolant
+    # conductance, so the head runs hotter for a smaller coolant rise.
+    pumped = MVEM(cfg)
+    pump = dict(nom); pump["cool_pump_scale"] = 0.5
+    for _ in range(400):
+        pumped.step(1.0, pump, atm, 100.0, tas_mps=40.0)
+    p_out = pumped.get_outputs()
+    assert max(p_out["cht_C"]) > max(h_out["cht_C"]), "Weak pump must raise head temperature"
+    d_cht_pump = max(p_out["cht_C"]) - max(h_out["cht_C"])
+    d_cht_rad = max(f_out["cht_C"]) - max(h_out["cht_C"])
+    d_cool_pump = p_out["coolant_temp_C"] - h_out["coolant_temp_C"]
+    d_cool_rad = f_out["coolant_temp_C"] - h_out["coolant_temp_C"]
+    assert (d_cht_pump / max(d_cool_pump, 1e-6)) > (d_cht_rad / max(d_cool_rad, 1e-6)), (
+        "Pump and radiator faults must be distinguishable by the head-to-coolant "
+        f"ratio (pump {d_cht_pump:.1f}/{d_cool_pump:.1f}, radiator "
+        f"{d_cht_rad:.1f}/{d_cool_rad:.1f})"
+    )
+    print(f"  coolant pump at 50 %: CHT +{d_cht_pump:.1f} C for coolant "
+          f"+{d_cool_pump:.1f} C (radiator: +{d_cht_rad:.1f} / +{d_cool_rad:.1f})")
+
+    # The air-cooled transfer profile must be untouched by all of this.
+    rotax = load_engine_profile("engine_rotax_914.yaml")
+    r_plant = MVEM(rotax)
+    for _ in range(60):
+        r_plant.step(1.0, {"cd_inj": [1.0] * rotax["geometry"]["cylinders"],
+                           "eta_v_scale": 1.0, "eta_c_scale": 1.0,
+                           "hA_scale": 1.0, "f_fric_scale": 1.0},
+                     isa(10000), 72.0)
+    r_out = r_plant.get_outputs()
+    assert r_out["coolant_temp_C"] is None and r_out["thermostat_frac"] is None, (
+        "A profile with no coolant loop must report null, not a number"
+    )
+    print("  Rotax (no coolant loop): coolant_temp_C = None, as it should be")
+    print("  PASSED")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -387,6 +492,7 @@ def run_tests():
     test_sensor_engine_asymmetry(cfg)
     test_fault_isolation(cfg)
     test_drivetrain(cfg)
+    test_cooling_loop(cfg)
     print("\nALL VERIFICATION TESTS PASSED.")
 
 

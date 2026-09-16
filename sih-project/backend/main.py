@@ -77,6 +77,7 @@ _RPM_LIMIT   = cfg["ratings"]["max_continuous_rpm"]
 _OIL_P_MIN   = cfg["limits"]["oil_pressure_bar"]["min_above_2500rpm"]
 _OIL_T_LIMIT = cfg["limits"]["oil_temp_C"]
 _GB_OIL_LIMIT = cfg["limits"]["gearbox_oil_C"]
+_COOLANT_LIMIT = cfg["limits"]["coolant_C"]
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,10 @@ _GB_OIL_LIMIT = cfg["limits"]["gearbox_oil_C"]
 # climb-rate claim — nothing here is derived from the airframe's performance;
 # it is set so the transition is watchable inside a demo slot.
 ALT_RAMP_S = 20.0
+
+# Whether this profile carries a coolant loop — decides what a `cooling`
+# fault means (radiator fouling vs the old conductance scale).
+_LIQUID_COOLED = cfg["mvem"].get("cooling", {}).get("type") == "liquid"
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +185,11 @@ def _limits_state(slow_vals: dict) -> str:
     gb_oil = slow_vals.get("gearbox_oil_C")
     if gb_oil is not None and gb_oil > _GB_OIL_LIMIT:
         return "exceeded"
+    coolant = slow_vals.get("coolant_temp_C")
+    if coolant is not None and coolant > _COOLANT_LIMIT:
+        return "exceeded"
+    if coolant is not None and coolant > _COOLANT_LIMIT * 0.95:
+        return "caution"
     return "green"
 
 
@@ -442,6 +452,8 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "fuel_rail_scale": 1.0,
                     "misfire_prob":   [0.0] * N_CYL,
                     "detonation_sev": [0.0] * N_CYL,
+                    "rad_eff_scale":  1.0,
+                    "cool_pump_scale": 1.0,
                 }
                 plantA_params, sensor_biasesA, isa_k = apply_fault_config(
                     t,
@@ -450,6 +462,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     fresh_sensor_biases(N_CYL),
                     conn["isa_offset_K"],
                     altitude_ft,
+                    liquid_cooled=_LIQUID_COOLED,
                 )
                 conn["isa_offset_K"] = isa_k
 
@@ -503,6 +516,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "oil_press_bar": measuredA["oil_press_bar"],
                     "oil_temp_C":    measuredA["oil_temp_C"],
                     "gearbox_oil_C": measuredA["gearbox_oil_C"],
+                    "coolant_temp_C": measuredA["coolant_temp_C"],
                 }
                 lim_state = _limits_state(limits_vals)
 
@@ -531,15 +545,11 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "fuel_flow_kgps": measuredA["fuel_flow_kgps"],
                     "lambda":         measuredA["lambda_val"],
                     "turbo_rpm":      measuredA["turbo_rpm"],
-                    # DERIVED, not sensed. The plant lumps compressor delivery
-                    # into manifold pressure (mvem.py: Pi_c = p_im/p_atm, no
-                    # intercooler dp) and never tracks a separate outlet
-                    # temperature, so there is nothing here to measure. Kept
-                    # because the schema is frozen; do NOT treat as independent
-                    # compressor instrumentation. Parity Path 2 uses the real
-                    # inlet sensors below (p_amb_hPa, oat_K) instead.
-                    "comp_out_p_hPa": measuredA["map_hPa"] * 1.05,
-                    "comp_out_T_K":   measuredA["iat_K"],
+                    # SENSED now, not derived: with an intercooler in the
+                    # model these are genuinely distinct from manifold pressure
+                    # and IAT, and parity Path 2 reads comp_out_p_hPa.
+                    "comp_out_p_hPa": measuredA["comp_out_p_hPa"],
+                    "comp_out_T_K":   measuredA["comp_out_T_K"],
                     "throttle_pct":   float(throttle_pct),
                     "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
@@ -550,6 +560,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "prop_rpm":        measuredA["prop_rpm"],
                     "blade_angle_deg": measuredA["blade_angle_deg"],
                     "gearbox_oil_C":   measuredA["gearbox_oil_C"],
+                    "coolant_temp_C":  measuredA["coolant_temp_C"],
                     **UNMODELLED,
                 }
 
@@ -579,15 +590,11 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "fuel_flow_kgps": measuredB["fuel_flow_kgps"],
                     "lambda":         measuredB["lambda_val"],
                     "turbo_rpm":      measuredB["turbo_rpm"],
-                    # DERIVED, not sensed. The plant lumps compressor delivery
-                    # into manifold pressure (mvem.py: Pi_c = p_im/p_atm, no
-                    # intercooler dp) and never tracks a separate outlet
-                    # temperature, so there is nothing here to measure. Kept
-                    # because the schema is frozen; do NOT treat as independent
-                    # compressor instrumentation. Parity Path 2 uses the real
-                    # inlet sensors below (p_amb_hPa, oat_K) instead.
-                    "comp_out_p_hPa": measuredB["map_hPa"] * 1.05,
-                    "comp_out_T_K":   measuredB["iat_K"],
+                    # SENSED now, not derived: with an intercooler in the
+                    # model these are genuinely distinct from manifold pressure
+                    # and IAT, and parity Path 2 reads comp_out_p_hPa.
+                    "comp_out_p_hPa": measuredB["comp_out_p_hPa"],
+                    "comp_out_T_K":   measuredB["comp_out_T_K"],
                     "throttle_pct":   float(throttle_pct),
                     "vib_rms_g":      [0.42] * N_CYL,   # unmodelled — no vibration model
                     "altitude_ft":    float(altitude_ft),
@@ -598,6 +605,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     "prop_rpm":        measuredB["prop_rpm"],
                     "blade_angle_deg": measuredB["blade_angle_deg"],
                     "gearbox_oil_C":   measuredB["gearbox_oil_C"],
+                    "coolant_temp_C":  measuredB["coolant_temp_C"],
                     **UNMODELLED,
                 }
 

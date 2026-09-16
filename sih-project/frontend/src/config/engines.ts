@@ -95,6 +95,8 @@ export interface EngineProfile {
   cruiseBladeAngle_deg?: number;
   /** Healthy-cruise gearbox oil temperature; absent without a gearbox oil node. */
   nominalGearboxOil_C?: number;
+  /** Healthy-cruise coolant temperature; absent on an air-cooled profile. */
+  nominalCoolant_C?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,7 @@ export const VRDE_180: EngineProfile = {
     // stay labelled assumed on screen).
     { key: 'rpm',  label: 'RPM (max continuous)', unit: 'rpm', limit: 3720, provenance: 'assumed' },
     { key: 'gbox', label: 'Gearbox oil',  unit: '°C',   limit: 120,  provenance: 'assumed' },
+    { key: 'coolant', label: 'Coolant',   unit: '°C',   limit: 105,  provenance: 'assumed' },
     // NOTE: no EGT row. EGT is a TREND parameter on this class, not a limit
     // parameter — which is precisely the information a twin exists to exploit.
   ],
@@ -165,6 +168,7 @@ export const VRDE_180: EngineProfile = {
   cruiseTas_mps: 61.2,
   cruiseBladeAngle_deg: 26.2,   // backend verify.py, 18,000 ft / 72 % steady state
   nominalGearboxOil_C: 99.4,    // same run
+  nominalCoolant_C: 87.4,       // backend, 18,000 ft / 72 %, thermostat ~49 % open
 };
 
 // ---------------------------------------------------------------------------

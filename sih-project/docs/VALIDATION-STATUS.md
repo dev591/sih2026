@@ -139,3 +139,66 @@ integral action (P-only sat 33–48 mbar above its own target everywhere).
 
 Suites: `test_sensors.py` 12/12, `verify.py` 5/5 (new drivetrain test),
 `gates_check.py` 6/6, sigma regenerated, live websocket frame healthy.
+
+## 2026-09-16 — liquid cooling loop and intercooler (Phase 3)
+
+The engine is an automotive-derived liquid-cooled diesel, but the twin held
+coolant temperature FIXED and used air-cooled fin area. Replaced with a real
+loop: coolant state, thermostat (80/95 °C stages, AE300 comparable), ram-air
+radiator, coolant-pump-driven head conductance (Dittus–Boelter Re^0.8), and an
+air-to-air intercooler. Head-to-coolant conductance is numerically identical to
+the old fin term (126 W/K), so head temperature behaviour is continuous.
+
+| Anchor | after Phase 2 | after Phase 3 |
+|---|---:|---:|
+| DRDO 180 hp, sea level | −7.7 % | −7.7 % |
+| DRDO 180 hp, 11,000 ft | −12.5 % | **−7.7 %** |
+| EOI lapse 10k / 20k / 30k ft | inside / inside / −1.6 % outside | **inside / inside / inside** |
+| Sea-level BSFC vs EOI 210 g/kWh | 181 (−13.7 %) | 181 (−13.7 %) |
+
+**Power is now flat from sea level to 11,000 ft (166.2 hp at both)** — the
+shape DRDO publishes — because the intercooler's denser charge holds mass flow
+as pressure falls. Nothing was tuned to achieve it.
+
+Cooling behaviour, measured (500 s to steady state):
+
+| Case | Coolant | Thermostat | CHT | Charge air |
+|---|---:|---:|---:|---|
+| Sea-level take-off | 91.8 °C | 79 % | 171.5 °C | 117.9 → 51.0 °C |
+| Hot-day take-off, ISA+20 | 99.5 °C | 100 % | 179.2 °C | 137.9 → 71.0 °C |
+| 18,000 ft cruise | 87.4 °C | 49 % | 151.5 °C | 90.0 → 18.1 °C |
+
+The radiator was re-sized (0.067 → 0.086 m²) after the first sizing — done for
+an ISA-standard day — ran the coolant to 117.7 °C at ISA+20. Aircraft cooling
+is sized for the hot day; the sweep behind the new value is in the profile.
+
+**Two cooling faults now have distinct signatures**, where the old abstract
+`hA_scale` had one: a fouled radiator (50 %) raises coolant 91.8 → 134.3 °C and
+CHT 171.5 → 213.7 °C; a degraded coolant pump (50 %) raises CHT by 59 °C while
+leaving coolant essentially unchanged.
+
+**Open items, stated plainly:**
+- **The turbo overspeed clamp is now binding at every operating point** —
+  sea level through 20,000 ft, cruise included. Boost is therefore limited by an
+  assumed 110,000 rpm ceiling rather than by the compressor map. Raising it to
+  the published comparable containment speed (172,000 rpm) pushes critical
+  altitude to ~16,000 ft against DRDO's published 11,000 ft, so compressor and
+  turbine sizing must be calibrated in Phase 6 for critical altitude to emerge
+  from the physics. Do not quote "critical altitude" as an emergent result until
+  then.
+- **Gate 6 checks MAP shape, which is a proxy.** DRDO's published claim is about
+  POWER, and power is flat to 11,000 ft; manifold pressure now falls steadily
+  from sea level because the intercooler trades pressure for density. Phase 6
+  converts this gate to the published power bands.
+- **ρ₅ no longer carries friction at 3σ** (1.42 per sample, 2.55 on the
+  detector window), so Gate 4 now judges friction on **ρ₁₀ (53.7σ)** and reports
+  ρ₅ as corroboration. Measured across 10–240 s settle times, σ₅ does not move,
+  so this is sensor accuracy, not a warm-up transient.
+- σ(ρ₁) fell 0.0085 → 0.0056: Path 2 now reads its own compressor-delivery
+  sensor, so Paths 1 and 2 share no sensor at all. σ(ρ₄) rose 1.23× (the energy
+  closure now uses measured coolant temperature). Others within ±5 %.
+- Power still 7.7 % low and BSFC ~14 % better than the EOI requirement.
+- Rotax 914 transfer remains bit-identical throughout.
+
+Suites: `test_sensors.py` 12/12, `verify.py` 6/6 (new cooling test),
+`gates_check.py` 6/6, sigma regenerated.

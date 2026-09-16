@@ -169,7 +169,7 @@ validation_anchors:
 limits:
   provenance: assumed            # no public TCDS for this engine; see Rotax profile
   cht_C: 200.0                   # cylinder head temperature
-  coolant_C: 110.0
+  coolant_C: 105.0               # published_comparable_engine — TCDS E.200, E4 max coolant
   oil_temp_C: 130.0
   gearbox_oil_C: 120.0           # published_comparable_engine — TCDS E.200 max gearbox temperature
   oil_pressure_bar:
@@ -360,6 +360,22 @@ mvem:
     # real physical limit. Sized so it does not bind at the 18,000 ft cruise
     # gate (measured ~103k rpm there) but does bind above the engine's own
     # published 11,000 ft critical altitude.
+    # ⚠ THIS CLAMP IS NOW THE BINDING CONSTRAINT AT EVERY OPERATING POINT,
+    # which it was not when it was calibrated. Measured after the intercooler
+    # landed (2026-09-16), 100 % throttle: turbo sits at exactly 110,000 rpm at
+    # sea level, 6k, 11k, 16k and 20k ft, and at 18,000 ft / 72 % cruise too —
+    # i.e. the model's boost is limited by an ASSUMED mechanical ceiling rather
+    # than by the compressor map. Raising it changes the story completely:
+    #   ceiling 140,000 and 172,000 rpm give IDENTICAL results (the clamp stops
+    #   binding), MAP then holds 2.20 bar to 16,000 ft and power stays flat at
+    #   166 hp to 20,000 ft — i.e. critical altitude moves to ~16k, against
+    #   DRDO's published 11,000 ft.
+    # So the published comparable containment speed (172,000 rpm, E4 / TCDS
+    # E.200) cannot simply be dropped in: the compressor and turbine sizing
+    # (Ellipse constants, n_corr_design, mdot_ex_design) must be calibrated so
+    # that critical altitude EMERGES from the map at the published 11,000 ft.
+    # That is Phase 6's job and is recorded in docs/VALIDATION-STATUS.md; until
+    # then this stays an assumed clamp doing work it should not have to do.
     max_shaft_rpm: 110000
 
   turbine:
@@ -436,6 +452,73 @@ mvem:
     # flow through measured fuel_flow_kgps), so using one shared constant for
     # both is not degenerate the way sharing eta_c/eta_v would be.
     eta_i_nominal: 0.50
+
+  cooling:
+    # LIQUID COOLING LOOP. The engine is an automotive-derived liquid-cooled
+    # diesel (dossier §1: the mHawk base and every same-class aero-diesel are
+    # liquid-cooled), but the twin modelled a FIXED coolant temperature and
+    # air-cooled fin area — so coolant temperature could never rise, a blocked
+    # radiator was unmodellable, and the only cooling fault was an abstract
+    # conductance scale. This block replaces that with a real loop.
+    #
+    #   dT_cool/dt * C = sum_i UA_head (T_cht_i - T_cool)     head rejection
+    #                  + oil-cooler heat + gearbox-oil heat   other loads
+    #                  - x_thermostat * eff_rad * mdot_ram * cp * (T_cool - T_amb)
+    #
+    # A profile WITHOUT this block (engine_rotax_914.yaml, a hybrid air/liquid
+    # engine) keeps the previous fixed-coolant air-path model unchanged.
+    type: liquid
+    provenance: derived              # from the engine's class; VRDE publishes no cooling data
+    # Lumped coolant + block/head metal heat capacity. assumed: ~4 L of 50/50
+    # glycol (~3.5 kJ/kgK) plus the metal it is in contact with. tau at the
+    # sized radiator UA is ~45 s, the right order for a warm-up transient.
+    coolant_thermal_mass_kJ_per_K: 30.0
+    # Head-to-coolant conductance. Numerically IDENTICAL to the old
+    # head_htc_W_per_m2K * fin_area_m2 = 450 * 0.28 = 126 W/K, so cylinder-head
+    # temperature behaviour is continuous across this change; only the sink
+    # temperature becomes a state instead of a constant.
+    head_to_coolant_UA_W_per_K: 126.0
+    # Conductance follows coolant flow as Re^0.8 (Dittus-Boelter,
+    # Nu = 0.023 Re^0.8 Pr^n — published correlation form), with flow taken
+    # proportional to crank speed because the pump is belt/gear driven. This is
+    # what makes a degraded coolant pump a physically distinct fault from a
+    # blocked radiator.
+    coolant_flow_exponent: 0.8
+    thermostat:
+      # published_comparable_engine — AE300/AE330 maintenance manual stages:
+      # small circuit below 80 degC, mixed 80-95, full radiator flow above 95.
+      open_C: 80.0
+      full_open_C: 95.0
+    radiator:
+      # Ram-air core. mdot_ram = rho_amb * TAS * frontal_area * capture_fraction.
+      # frontal_area is SIZED (not fitted to a test) for the worst cooling case
+      # a real installation is sized for: HOT-DAY take-off at low airspeed.
+      # First pass used the ISA-standard day (15 degC) and gave 0.067 m^2 —
+      # which then ran the coolant to 117.7 degC at ISA+20, over the 105 degC
+      # limit. Aircraft cooling is sized for the hot day, so it was re-sized
+      # against that case. Measured across a sweep (backend, 500 s to steady
+      # state, 100 % throttle, 40 m/s):
+      #   A_rad    SL ISA    SL ISA+20    18,000 ft cruise
+      #   0.067    94.6      117.7 (over)  89.3
+      #   0.078    92.8      106.1 (over)  88.1
+      #   0.086    91.8       99.5         87.4     <- chosen, 5.5 K margin
+      #   0.095    90.8       94.7         86.7
+      # At the sizing point the thermostat is fully open, which is what "sized
+      # for the worst case" means — and it is why radiator fouling shows up as
+      # rising coolant temperature rather than being absorbed by the valve.
+      # At altitude the core is far oversized and the thermostat closes to hold
+      # the coolant in its band instead.
+      frontal_area_m2: 0.086
+      capture_fraction: 0.35         # assumed — duct/ram recovery through the cowl
+      effectiveness: 0.60            # assumed — compact air-to-air core
+    intercooler:
+      # Air-to-air charge-air cooler (the automotive base engine is intercooled;
+      # dossier §2). Effectiveness assumed mid-range for a compact air-to-air
+      # core. This is the first model in which IAT is genuinely post-intercooler
+      # (telemetry-schema.md has always described it that way) and in which
+      # comp_out_T_K / comp_out_p_hPa are real values rather than MAP echoes.
+      effectiveness: 0.65            # assumed
+      dp_hPa_at_rated_flow: 30.0     # assumed — core pressure drop, scales with flow^2
 
   thermal:
     head_mass_kg: 3.2                     # per cylinder, lumped

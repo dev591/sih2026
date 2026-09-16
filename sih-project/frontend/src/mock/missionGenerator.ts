@@ -475,6 +475,7 @@ function makeEngineB(
     prop_rpm: CRUISE.rpm / eng.gearRatio + noise(1),
     blade_angle_deg: eng.cruiseBladeAngle_deg == null ? null : eng.cruiseBladeAngle_deg + noise(0.05),
     gearbox_oil_C: eng.nominalGearboxOil_C == null ? null : eng.nominalGearboxOil_C + noise(0.2),
+    coolant_temp_C: eng.nominalCoolant_C == null ? null : eng.nominalCoolant_C + noise(0.15),
   };
 }
 
@@ -534,6 +535,7 @@ function makeTick(
     prop_rpm: CRUISE.rpm / eng.gearRatio + noise(1),
     blade_angle_deg: eng.cruiseBladeAngle_deg == null ? null : eng.cruiseBladeAngle_deg + noise(0.05),
     gearbox_oil_C: eng.nominalGearboxOil_C == null ? null : eng.nominalGearboxOil_C + noise(0.2),
+    coolant_temp_C: eng.nominalCoolant_C == null ? null : eng.nominalCoolant_C + noise(0.15),
   };
 
   const fast: FastFeatures = {

@@ -69,6 +69,10 @@ def _phys(egt=720.0, cht=140.0, iat_K=318.0, n_cyl=4, rpm=3580.0):
         "prop_rpm": 2123.0,
         "blade_angle_deg": 26.0,
         "gearbox_oil_C": 95.0,
+        # Cooling and charge air.
+        "coolant_temp_C": 88.0,
+        "comp_out_T_K": 398.0,
+        "comp_out_p_hPa": 1421.0,
     }
 
 
@@ -311,6 +315,16 @@ def test_drivetrain_channels():
         )
         assert worst <= r + 1e-9, f"{name}: post-calibration offset {worst:.3f} > {r}"
         assert worst > 1e-6, f"{name}: calibration must leave the reference's error, not zero"
+
+    # Coolant/charge-air channels, and the null path for a profile with no loop.
+    assert abs(twin["coolant_temp_C"] - 88.0) < 1.0, (
+        f"Coolant NTC should read ~88 degC, got {twin['coolant_temp_C']:.2f}"
+    )
+    assert abs(twin["comp_out_T_K"] - 398.0) < 1.0
+    assert abs(twin["comp_out_p_hPa"] - 1421.0) < 2.0
+    no_loop = _phys()
+    no_loop["coolant_temp_C"] = None
+    assert MeasurementModel(seed=21).measure(no_loop, add_noise=False)["coolant_temp_C"] is None
 
     fixed = _phys()
     fixed["blade_angle_deg"] = None

@@ -550,7 +550,31 @@ class MeasurementModel:
                 + float(self._offset.get("gearbox_oil_C", 0.0)) \
                 + self._n("gearbox_oil_C", add_noise)
 
+        # ---- cooling and charge air ----
+        if phys.get("coolant_temp_C") is None:
+            coolant = None       # no coolant loop on this profile
+        else:
+            r_cool = ntc_resistance_ohm(phys["coolant_temp_C"])
+            coolant = ntc_temp_C(quantise(r_cool, 50.0, 40000.0))
+            coolant = self._apply_lag("coolant_temp_C", coolant, dt) \
+                + float(self._offset.get("coolant_temp_C", 0.0)) \
+                + self._n("coolant_temp_C", add_noise)
+
+        cot_lo, cot_hi = _CH["comp_out_T_K"]["range"]
+        comp_T = self._apply_lag("comp_out_T_K", phys["comp_out_T_K"], dt) \
+            + float(self._offset.get("comp_out_T_K", 0.0)) \
+            + self._n("comp_out_T_K", add_noise)
+
+        cop_lo, cop_hi = _CH["comp_out_p_hPa"]["range"]
+        comp_p = quantise(phys["comp_out_p_hPa"], cop_lo, cop_hi)
+        comp_p = self._apply_lag("comp_out_p_hPa", comp_p, dt) \
+            + float(self._offset.get("comp_out_p_hPa", 0.0)) \
+            + self._n("comp_out_p_hPa", add_noise)
+
         out.update({
+            "coolant_temp_C": (float(coolant) if coolant is not None else None),
+            "comp_out_T_K": float(comp_T),
+            "comp_out_p_hPa": float(comp_p),
             "tas_mps": float(tas),
             "prop_rpm": float(prop_rpm),
             "blade_angle_deg": (float(beta) if beta is not None else None),

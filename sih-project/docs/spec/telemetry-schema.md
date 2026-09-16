@@ -56,8 +56,9 @@ skip.
   "fuel_rail_bar": 900.0,       // common rail: 250-2000+ bar.  [UNMODELLED]
   "lambda": 1.42,               // wideband UEGO. Path 3 depends on this.
   "turbo_rpm": 118400.0,        // turbocharger shaft speed
-  "comp_out_p_hPa": 1240.0,     // compressor delivery pressure (before intercooler)
-  "comp_out_T_K": 372.4,
+  "comp_out_p_hPa": 1240.0,     // compressor delivery pressure, SENSED (before the intercooler)
+  "comp_out_T_K": 372.4,        // compressor delivery temperature, SENSED (before the intercooler)
+  "coolant_temp_C": 87.4,       // THE production cooling channel; null on an air-cooled profile
   "inj_timing_deg": 12.4,       // PS component B, named       [UNMODELLED]
   "bus_voltage_V": 27.8,        // PS component B, named       [UNMODELLED]
   "alternator_A": 14.2,         // PS component B, named       [UNMODELLED]

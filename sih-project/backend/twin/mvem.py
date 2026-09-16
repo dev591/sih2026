@@ -26,6 +26,36 @@ class MVEM:
         self.T_cool = mvem_cfg['thermal']['coolant_temp_K']
         self.h_head = mvem_cfg['thermal']['head_htc_W_per_m2K']
 
+        # --- Cooling system. A profile with no `cooling:` block (the Rotax
+        # hybrid air/liquid transfer profile) keeps the fixed-coolant air-path
+        # model above, bit-identical.
+        cool = mvem_cfg.get('cooling')
+        self._liquid_cooling = bool(cool) and cool.get('type') == 'liquid'
+        if self._liquid_cooling:
+            self._cool_C = cool['coolant_thermal_mass_kJ_per_K'] * 1000.0
+            self._cool_UA_head = cool['head_to_coolant_UA_W_per_K']
+            self._cool_flow_exp = cool['coolant_flow_exponent']
+            self._stat_open = cool['thermostat']['open_C'] + 273.15
+            self._stat_full = cool['thermostat']['full_open_C'] + 273.15
+            rad = cool['radiator']
+            self._rad_A = rad['frontal_area_m2']
+            self._rad_capture = rad['capture_fraction']
+            self._rad_eff = rad['effectiveness']
+            ic = cool['intercooler']
+            self._ic_eff = ic['effectiveness']
+            self._ic_dp_rated_pa = ic['dp_hPa_at_rated_flow'] * 100.0
+            self._rated_rpm = self.cfg['ratings'].get('rated_speed_rpm', 3800.0)
+            # Rated air flow, for scaling the intercooler's pressure drop.
+            # Read straight from cfg: self.AFR_st is assigned further down, and
+            # this block runs before it.
+            self._mdot_rated = (self.cfg['fuel']['rated_fuel_flow_kgps']
+                                * self.cfg['fuel']['AFR_stoich'] * 1.15)
+        # Reported diagnostics — meaningless until the first step() on a
+        # profile without liquid cooling, so they stay None there.
+        self.thermostat_frac = 0.0
+        self.T_comp_out = 288.15
+        self.p_comp_out = 101325.0
+
         self.Q_LHV = self.cfg['fuel']['Q_LHV_J_per_kg']
         self.AFR_st = self.cfg['fuel']['AFR_stoich']
         fuel_cfg = self.cfg['fuel']
@@ -185,6 +215,9 @@ class MVEM:
         self._beta_trim = self.beta_deg
         self._gov_int = 0.0
         self.T_gb = self.T_cool + 10.0
+        # Coolant is a STATE on a liquid-cooled profile. Initialised at the
+        # previous fixed value so a fresh model starts where the old one sat.
+        self.T_cool_state = self.T_cool
 
         # Turbo shaft state is KINETIC ENERGY, not speed — §1.1. The old
         # dw_tc/dt = (P_turb-P_comp)/(J_tc*w_tc) has a 1/w_tc singularity: as
@@ -277,6 +310,11 @@ class MVEM:
         hA_scale = params.get('hA_scale', 1.0)
         f_fric_scale = params.get('f_fric_scale', 1.0)
         oil_pump_scale = params.get('oil_pump_scale', 1.0)
+        # Cooling faults are now two physically distinct mechanisms instead of
+        # one abstract conductance: a blocked/fouled radiator core, and a
+        # degraded coolant pump.
+        rad_eff_scale = params.get('rad_eff_scale', 1.0)
+        cool_pump_scale = params.get('cool_pump_scale', 1.0)
         fuel_rail_scale = params.get('fuel_rail_scale', 1.0)
         misfire_prob = params.get('misfire_prob', [0.0] * self.N_cyl)
         detonation_sev = params.get('detonation_sev', [0.0] * self.N_cyl)
@@ -416,6 +454,10 @@ class MVEM:
             imbalance = np.max(np.abs(T_ind_i - mean_T)) / max(mean_T, 1e-6)
             self.ripple = 0.004 + imbalance * 0.62
 
+            # Everything that rejects heat "to coolant" uses the coolant STATE
+            # on a liquid-cooled profile, and the old fixed constant otherwise.
+            self.T_cool_sink = self.T_cool_state if self._liquid_cooling else self.T_cool
+
             # Oil system — §1.6. Wear widens the effective clearance; since
             # laminar flow through a clearance goes as 1/d^4, this uses the
             # SAME f_fric_scale that already drives bearing friction torque,
@@ -427,13 +469,24 @@ class MVEM:
             self.oil_press_bar_val = min(dp_bearing_bar, self._oil_relief_bar)
 
             P_fric_actual = T_fric * self.w
-            dT_oil_dt = (P_fric_actual - self._oil_cooler_gain * (self.T_oil - self.T_cool)) \
+            dT_oil_dt = (P_fric_actual - self._oil_cooler_gain * (self.T_oil - self.T_cool_sink)) \
                 / self._oil_thermal_mass_J
 
             # 4. Cylinder Head Thermal
             Q_gas_i = 0.15 * self.fuel_delivered * self.Q_LHV * Q_gas_mult
-            h_air = self.h_head * hA_scale
-            dT_cht_dt = (Q_gas_i - h_air * self.A_fin * (self.T_cht - self.T_cool)) / (self.m_cht * self.cp_cht)
+            if self._liquid_cooling:
+                # Conductance follows coolant flow (pump is speed-driven) as
+                # Re^0.8 — Dittus-Boelter. hA_scale remains the UKF's health
+                # parameter on this conductance; a degraded PUMP lands here,
+                # while a blocked RADIATOR acts on the radiator term below.
+                flow_frac = min(max(N_rpm / self._rated_rpm, 0.05), 1.2) * cool_pump_scale
+                ua_head = self._cool_UA_head * hA_scale * flow_frac ** self._cool_flow_exp
+                q_head_i = ua_head * (self.T_cht - self.T_cool_state)
+                dT_cht_dt = (Q_gas_i - q_head_i) / (self.m_cht * self.cp_cht)
+            else:
+                h_air = self.h_head * hA_scale
+                q_head_i = h_air * self.A_fin * (self.T_cht - self.T_cool)
+                dT_cht_dt = (Q_gas_i - q_head_i) / (self.m_cht * self.cp_cht)
 
             Q_ex_i = self.fuel_delivered * self.Q_LHV - T_ind_i * self.w - Q_gas_i
             m_ex_i = (self.m_a / self.N_cyl) + self.fuel_delivered
@@ -461,8 +514,16 @@ class MVEM:
                 'flow_capacity_loss_ratio', 0.0)
             phi_c_scale = 1.0 - flow_ratio * (1.0 - eta_c_scale)
             phi_c_scale = float(np.clip(phi_c_scale, 0.3, 1.0))
-            Pi_c = self.p_im / p_atm  # NO clamp to >=1 — §1.3: Pi_c<1 is a
-                                       # legitimate restriction/choke state,
+            # Compressor outlet pressure = manifold pressure plus the
+            # intercooler core's drop (flow-squared). Pi_c is the COMPRESSOR's
+            # pressure ratio, so it is taken here and not at the manifold.
+            if self._liquid_cooling:
+                flow_ratio_ic = max(self.m_a, 0.0) / max(self._mdot_rated, 1e-6)
+                self.p_comp_out = self.p_im + self._ic_dp_rated_pa * flow_ratio_ic ** 2
+            else:
+                self.p_comp_out = self.p_im
+            Pi_c = self.p_comp_out / p_atm  # NO clamp to >=1 — §1.3: Pi_c<1 is
+                                       # a legitimate restriction/choke state,
                                        # not an error condition.
 
             for _ in range(TURB_SUBSTEPS):
@@ -539,9 +600,19 @@ class MVEM:
                 dE_tc_dt = self.eta_m_tc * P_turb - P_comp
                 self.E_tc = np.clip(self.E_tc + dE_tc_dt * h_tc, self._E_tc_min, self._E_tc_max)
 
-            # 1. Intake Manifold
-            self.T_im = T_atm + (T_atm / max(self.eta_c_last, 1e-3)) * \
+            # 1. Intake manifold, now through the charge-air cooler.
+            # Compressor DELIVERY temperature first...
+            self.T_comp_out = T_atm + (T_atm / max(self.eta_c_last, 1e-3)) * \
                 (max(Pi_c, 1e-3) ** ((self.gamma - 1) / self.gamma) - 1.0)
+            if self._liquid_cooling:
+                # ...then the intercooler removes `effectiveness` of the
+                # available temperature rise above ambient. IAT is therefore
+                # genuinely post-intercooler, as telemetry-schema.md has always
+                # said it was, and the charge is denser — which is the physical
+                # reason this phase gains power rather than a tuned constant.
+                self.T_im = self.T_comp_out - self._ic_eff * (self.T_comp_out - T_atm)
+            else:
+                self.T_im = self.T_comp_out
             dp_im_dt = (self.R * self.T_im / self.V_im) * (self.m_c - self.m_a)
 
             # Apply integration
@@ -552,8 +623,29 @@ class MVEM:
             self.T_oil = max(self.T_oil, 250.0)
             if self._has_gearbox:
                 q_gb = (1.0 / self._eta_gb - 1.0) * max(P_prop, 0.0)
-                self.T_gb += (q_gb - self._gb_UA * (self.T_gb - self.T_cool)) \
+                self.T_gb += (q_gb - self._gb_UA * (self.T_gb - self.T_cool_sink)) \
                     / self._gb_thermal_mass_J * h
+            else:
+                q_gb = 0.0
+
+            if self._liquid_cooling:
+                # THERMOSTAT: proportional opening between its two published
+                # stage temperatures. Closed, the radiator is bypassed, which is
+                # what stops the (deliberately take-off-sized) core overcooling
+                # the engine at altitude.
+                self.thermostat_frac = float(np.clip(
+                    (self.T_cool_state - self._stat_open)
+                    / (self._stat_full - self._stat_open), 0.0, 1.0))
+                mdot_ram = (p_atm / (self.R * max(T_atm, 1.0))) * tas \
+                    * self._rad_A * self._rad_capture
+                q_rad = (self.thermostat_frac * self._rad_eff * rad_eff_scale
+                         * mdot_ram * self.cp_air
+                         * (self.T_cool_state - T_atm))
+                q_in = float(np.sum(q_head_i)) \
+                    + self._oil_cooler_gain * (self.T_oil - self.T_cool_state) \
+                    + q_gb
+                self.T_cool_state += (q_in - max(q_rad, 0.0)) / self._cool_C * h
+                self.T_cool_state = min(max(self.T_cool_state, T_atm), 473.15)
 
             self.w = max(self.w, 10.0)
             # No floor on p_im at 0.4*p_atm — the old clamp WAS the
@@ -599,4 +691,12 @@ class MVEM:
             'gearbox_oil_C': float(self.T_gb - 273.15) if self._has_gearbox else None,
             'prop_power_kW': float(self.P_prop_last / 1000.0),
             'tas_mps': float(self._tas_last),
+            # Cooling and charge air. None on a profile with no coolant loop —
+            # a channel with no sensor reads null rather than a made-up number.
+            'coolant_temp_C': (float(self.T_cool_state - 273.15)
+                               if self._liquid_cooling else None),
+            'thermostat_frac': (float(self.thermostat_frac)
+                                if self._liquid_cooling else None),
+            'comp_out_T_K': float(self.T_comp_out),
+            'comp_out_p_hPa': float(self.p_comp_out / 100.0),
         }

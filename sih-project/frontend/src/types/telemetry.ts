@@ -57,6 +57,9 @@ export interface SlowFrame {
   blade_angle_deg: number | null;
   /** Gearbox oil temperature; null on a profile with no gearbox oil node. */
   gearbox_oil_C: number | null;
+  /** Coolant temperature — THE production channel on a liquid-cooled diesel.
+   *  Null on a profile with no coolant loop (the air-cooled Rotax). */
+  coolant_temp_C: number | null;
 }
 
 // ---------------------------------------------------------------------------
