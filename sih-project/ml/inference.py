@@ -151,6 +151,12 @@ class InferencePipeline:
         damage_rate_per_hr : dD/dt from BE-1
         """
         rho_arr = np.array([x if x is not None else np.nan for x in rho], dtype=float)
+        # TRAIN/SERVE CONTRACT: unavailable residuals (rho3 today: no Path 4 on
+        # an unthrottled engine, so the parity code returns None) become 0.0
+        # here. Every training loader MUST zero-fill NaN residuals identically —
+        # data/sim_v1 carries rho3_n as NaN by design — or the model trains on
+        # NaN / a different constant than it is served and quietly underperforms.
+        # See ml/train.py.
         rho_nn  = np.where(np.isnan(rho_arr), 0.0, rho_arr).astype(np.float32)
 
         # Rolling window
