@@ -55,9 +55,30 @@ OPERATING_POINTS = [
     (11000, 40), (11000, 72), (11000, 100),
 ]
 
-STEPS_TO_STEADY_STATE = 10
+# 150 s, not 10: the coolant loop's time constant is ~45 s and the oil bulk is
+# slower still, so a 10 s settle sampled a WARM-UP TRANSIENT into rho4, rho12
+# and rho13 rather than the steady healthy population sigma is supposed to
+# describe.
+STEPS_TO_STEADY_STATE = 150
 SAMPLES_PER_POINT     = 30
 DT                    = 1.0
+
+# Independent instrumentation packages observing the SAME engine at each
+# operating point.
+#
+# Why this exists: for several channels the healthy spread is dominated by
+# FIXED per-probe calibration offsets, not by per-sample noise — measured
+# between/within variance ratios of 3.6 (rho8) and 6.5 (rho12). With one probe
+# set per operating point, sigma for those channels rested on nine draws, and
+# rho12's 90 % CI was [0.60, 1.09] on a 0.97 estimate. Dividing a residual by
+# an under-determined sigma is how a real fault gets scaled into or out of
+# visibility.
+#
+# The plant physics is identical across probe sets — only the transducers
+# differ — so one physics run can be observed by K instrumentation packages at
+# essentially no extra cost. Each carries its own lag state and its own
+# once-drawn offsets, which is exactly the population being characterised.
+PROBE_SETS_PER_POINT  = 6
 
 
 # ---------------------------------------------------------------------------
@@ -84,23 +105,35 @@ def collect_raw_rho(cfg: dict) -> np.ndarray:
     for altitude_ft, throttle_pct in OPERATING_POINTS:
         atm = isa(altitude_ft, isa_offset_K=0.0)
 
-        plant        = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
+        base_seed    = hash((altitude_ft, throttle_pct)) & 0xFFFF
+        plant        = MVEM(cfg, seed=base_seed)
         twin         = MVEM(cfg, seed=999)
-        measure_plant = MeasurementModel(seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
-        measure_twin  = MeasurementModel(seed=999, is_twin=True)
+        # K independent instrumentation packages on the one engine.
+        probes       = [MeasurementModel(seed=base_seed + 7919 * k)
+                        for k in range(PROBE_SETS_PER_POINT)]
+        measure_twin = MeasurementModel(seed=999, is_twin=True)
 
         for _ in range(STEPS_TO_STEADY_STATE):
             plant.step(DT, nominal_params, atm, throttle_pct)
             twin.step( DT, nominal_params, atm, throttle_pct)
+            # Settle the lag filters too, or the first logged sample carries a
+            # step response instead of a steady reading.
+            out_p, out_t = plant.get_outputs(), twin.get_outputs()
+            for probe in probes:
+                probe.measure(out_p, add_noise=True)
+            measure_twin.measure(out_t, add_noise=False)
 
         for _ in range(SAMPLES_PER_POINT):
             plant.step(DT, nominal_params, atm, throttle_pct)
             twin.step( DT, nominal_params, atm, throttle_pct)
 
-            measured  = measure_plant.measure(plant.get_outputs(), add_noise=True)
-            predicted = measure_twin.measure(twin.get_outputs(),   add_noise=False)
-            rho = compute_residuals(measured, predicted, cfg, sigma_vec=None)
-            samples.append(rho)
+            out_p, out_t = plant.get_outputs(), twin.get_outputs()
+            predicted = measure_twin.measure(out_t, add_noise=False)
+            for probe in probes:
+                measured = probe.measure(out_p, add_noise=True)
+                samples.append(
+                    compute_residuals(measured, predicted, cfg, sigma_vec=None)
+                )
 
     # ρ₃ is None for VRDE (unthrottled, no Path 4) — replace with NaN so
     # the array stays numeric.
@@ -114,7 +147,8 @@ def compute_sigma(raw: np.ndarray) -> list:
     """
     Compute per-channel standard deviation from healthy samples.
 
-    ρ₃ column is all-NaN for the VRDE; nanstd returns NaN for it which
+    ρ₃ is all-NaN for the VRDE (and ρ₁₂ on a profile with no coolant
+    loop); nanstd returns NaN for such a column, which
     is replaced with 1.0 (harmless placeholder — the channel is never
     populated, so the divisor is never used for real data).
 
@@ -424,7 +458,8 @@ def main() -> None:
         "rho1_sd_vs_comp",   "rho2_sd_vs_lambda", "rho3_sd_vs_restr",
         "rho4_energy",       "rho5_power",
         "rho6_cyl_dev",      "rho7_cyl_dev",       "rho8_cyl_dev",
-        "rho9_cyl_dev",      "rho10_oil",           "rho11_ripple",
+        "rho9_cyl_dev",      "rho10_oil",          "rho11_ripple",
+        "rho12_coolant",     "rho13_head_temp",
     ]
     print(
         f"Sampled {raw.shape[0]} healthy points across "

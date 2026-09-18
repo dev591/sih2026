@@ -1,0 +1,828 @@
+<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Extended PRAMANA</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+  :root {
+    --ground: #F1F4F4;
+    --surface: #FFFFFF;
+    --surface-sunk: #E8EDED;
+    --ink: #121A1C;
+    --ink-soft: #465558;
+    --ink-faint: #6E7D80;
+    --rule: #D2DADB;
+    --rule-strong: #B5C1C3;
+    --accent: #14606B;
+    --accent-soft: #E0EEEF;
+    --caution: #9A6412;
+    --caution-soft: #F6ECD9;
+    --limit: #A63A2E;
+    --limit-soft: #F7E5E2;
+    --good: #2F6B4F;
+    --good-soft: #E0EDE6;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --measure: 66ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0D1315;
+      --surface: #151E20;
+      --surface-sunk: #101819;
+      --ink: #E3EAEA;
+      --ink-soft: #A3B2B4;
+      --ink-faint: #7C8C8E;
+      --rule: #263234;
+      --rule-strong: #38474A;
+      --accent: #57B6C1;
+      --accent-soft: #123034;
+      --caution: #D9A24A;
+      --caution-soft: #2A2113;
+      --limit: #E08578;
+      --limit-soft: #2E1A17;
+      --good: #6FBF95;
+      --good-soft: #14251D;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0D1315;
+    --surface: #151E20;
+    --surface-sunk: #101819;
+    --ink: #E3EAEA;
+    --ink-soft: #A3B2B4;
+    --ink-faint: #7C8C8E;
+    --rule: #263234;
+    --rule-strong: #38474A;
+    --accent: #57B6C1;
+    --accent-soft: #123034;
+    --caution: #D9A24A;
+    --caution-soft: #2A2113;
+    --limit: #E08578;
+    --limit-soft: #2E1A17;
+    --good: #6FBF95;
+    --good-soft: #14251D;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 0 72px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-block: 48px 20px;
+    margin-bottom: 40px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(38px, 7vw, 62px);
+    line-height: 1.03;
+    letter-spacing: -0.025em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: clamp(18px, 2.4vw, 21px);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 58ch;
+    margin: 0 0 28px;
+    font-style: italic;
+  }
+
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+  }
+  .metastrip b {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* ---------- layout ---------- */
+
+  .frame {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 40px;
+    align-items: start;
+  }
+
+  @media (min-width: 900px) {
+    .frame { grid-template-columns: 210px minmax(0, 1fr); gap: 56px; }
+    .rail { position: sticky; top: 24px; }
+  }
+
+  .rail-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .rail ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .rail a {
+    font-family: var(--display);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--ink-soft);
+    text-decoration: none;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 4px;
+  }
+  .rail a:hover { color: var(--accent); }
+  .rail a span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    padding-top: 2px;
+  }
+
+  /* ---------- sections ---------- */
+
+  section { margin-bottom: 58px; scroll-margin-top: 20px; }
+
+  .sec-head {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    border-top: 1px solid var(--rule-strong);
+    padding-top: 14px;
+    margin-bottom: 20px;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(23px, 3.4vw, 30px);
+    line-height: 1.16;
+    letter-spacing: -0.017em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: -0.006em;
+    margin: 32px 0 10px;
+    color: var(--ink);
+  }
+
+  p { margin: 0 0 16px; max-width: var(--measure); }
+  section > ul, section > ol { max-width: var(--measure); }
+
+  a { color: var(--accent); }
+
+  strong { font-weight: 600; }
+  em.term { font-style: normal; font-family: var(--mono); font-size: 0.88em; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--surface-sunk);
+    padding: 1.5px 5px;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  ul, ol { padding-left: 20px; margin: 0 0 16px; }
+  li { margin-bottom: 8px; }
+  li::marker { color: var(--ink-faint); }
+
+  .lede {
+    font-size: 18.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    max-width: 60ch;
+  }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap {
+    overflow-x: auto;
+    margin: 0 0 22px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 540px;
+    font-family: var(--display);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface-sunk);
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td code { font-size: 12px; background: none; padding: 0; color: var(--ink-soft); }
+
+  /* ---------- tier bands ---------- */
+
+  .tiers { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule); background: var(--surface); margin-bottom: 22px; }
+  .tier {
+    display: grid;
+    grid-template-columns: 6px 1fr;
+    border-bottom: 1px solid var(--rule);
+  }
+  .tier:last-child { border-bottom: none; }
+  .tier-body { padding: 16px 18px; }
+  .tier-name {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 15.5px;
+    margin: 0 0 3px;
+  }
+  .tier-basis {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .tier p { font-size: 15px; margin: 0; max-width: 56ch; }
+  .t-good { background: var(--good); }
+  .t-caution { background: var(--caution); }
+  .t-limit { background: var(--rule-strong); }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 15px 18px;
+    margin: 0 0 22px;
+    max-width: var(--measure);
+  }
+  .note p { margin: 0; font-size: 15.5px; }
+  .note p + p { margin-top: 10px; }
+
+  .warn {
+    border-left: 3px solid var(--limit);
+    background: var(--limit-soft);
+    padding: 15px 18px;
+    margin: 0 0 22px;
+    max-width: var(--measure);
+  }
+  .warn p { margin: 0; font-size: 15.5px; }
+  .warn-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--limit);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .pull {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: clamp(19px, 2.7vw, 24px);
+    line-height: 1.33;
+    letter-spacing: -0.014em;
+    color: var(--ink);
+    border-top: 2px solid var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding: 20px 0;
+    margin: 30px 0;
+    max-width: 44ch;
+    text-wrap: balance;
+  }
+
+  /* ---------- decision blocks ---------- */
+
+  .decision {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--caution);
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .decision h3 { margin: 0 0 8px; font-size: 16px; }
+  .decision p { font-size: 15px; margin: 0 0 10px; max-width: 58ch; }
+  .decision p:last-child { margin-bottom: 0; }
+  .rec {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--good);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- layer stack ---------- */
+
+  .layers { display: flex; flex-direction: column; gap: 2px; margin-bottom: 22px; }
+  .layer {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 14px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 13px 16px;
+  }
+  .layer-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    padding-top: 3px;
+  }
+  .layer-name { font-family: var(--display); font-weight: 600; font-size: 15px; display: block; margin-bottom: 3px; }
+  .layer p { font-size: 14.5px; margin: 0; color: var(--ink-soft); max-width: 62ch; }
+  .layer.config { border-left: 3px solid var(--good); }
+  .layer.code { border-left: 3px solid var(--limit); }
+
+  @media (max-width: 520px) {
+    .layer { grid-template-columns: 1fr; gap: 5px; }
+  }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .chip-have { background: var(--good-soft); color: var(--good); }
+  .chip-new { background: var(--caution-soft); color: var(--caution); }
+  .chip-part { background: var(--accent-soft); color: var(--accent); }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    margin-top: 20px;
+    padding-top: 18px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  footer p { max-width: var(--measure); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">SIH 2026 · SIH26054 · DRDO — Robotics &amp; Drones</p>
+    <h1>Extended PRAMANA</h1>
+    <p class="standfirst">From a digital twin of one engine to a framework that commissions an engine it has never seen — and tells you honestly what it can and cannot claim about it.</p>
+    <div class="metastrip">
+      <span><b>For</b> team discussion</span>
+      <span><b>Status</b> proposal, nothing built</span>
+      <span><b>Branch</b> drdo-fidelity</span>
+      <span><b>Finale</b> December 2026</span>
+    </div>
+  </header>
+
+  <div class="frame">
+
+    <nav class="rail" aria-label="Contents">
+      <p class="rail-title">Contents</p>
+      <ol>
+        <li><a href="#s1"><span>01</span> Where we stand</a></li>
+        <li><a href="#s2"><span>02</span> What we build instead</a></li>
+        <li><a href="#s3"><span>03</span> Why it isn't scope drift</a></li>
+        <li><a href="#s4"><span>04</span> What stays constant</a></li>
+        <li><a href="#s5"><span>05</span> What we will claim</a></li>
+        <li><a href="#s6"><span>06</span> The experience</a></li>
+        <li><a href="#s7"><span>07</span> Adding your own engine</a></li>
+        <li><a href="#s8"><span>08</span> Have vs. new</a></li>
+        <li><a href="#s9"><span>09</span> Phases</a></li>
+        <li><a href="#s10"><span>10</span> Open decisions</a></li>
+        <li><a href="#s11"><span>11</span> Risks and limits</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section id="s1">
+        <div class="sec-head"><span class="sec-num">01</span><h2>Where PRAMANA stands today</h2></div>
+
+        <p class="lede">We won the college round with a digital twin of the VRDE 180 hp aero piston engine. The physics is real and the diagnosis works. But the system can model exactly one engine, and that limitation is visible in the code.</p>
+
+        <p>Three facts a DRDO evaluator could verify in minutes:</p>
+
+        <ul>
+          <li><strong>The server can only ever boot one engine.</strong> <code>backend/main.py:63</code> loads <code>engine_vrde_180.yaml</code> at module import. Worse, lines 74–80 read four limit keys — <code>oil_temp_C</code>, <code>gearbox_oil_C</code>, <code>coolant_C</code>, <code>oil_pressure_bar.min_above_2500rpm</code> — that <strong>do not exist in our own Rotax profile</strong>. Point the server at the second engine we ship and it raises <code>KeyError</code> before it starts.</li>
+          <li><strong>The two profiles aren't even the same schema.</strong> Rotax calls it <code>oil_temp_inlet_C</code>; VRDE calls it <code>oil_temp_C</code>. Rotax's oil-pressure threshold sits at 3500 rpm, VRDE's at 2500. The physics survives only through <code>.get()</code> branching.</li>
+          <li><strong>The interface doesn't read the engine file at all.</strong> <code>frontend/src/config/engines.ts</code> is a hand-written TypeScript restatement of each profile, kept in sync manually. So a perfect new YAML would be simulated by the backend while the dashboard displayed VRDE's name, limits and cylinder count.</li>
+        </ul>
+
+        <p>Add to that: one global <code>sensors.yaml</code> shared by every engine, one global <code>sigma_vector.json</code>, and the flight profile hardcoded in <code>main.py</code> (climb 5,000 → 18,000 ft over 480 s, throttle fixed at 72%).</p>
+
+        <div class="warn">
+          <span class="warn-label">The real risk</span>
+          <p>Fault injection alone makes this a closed demo: we inject, they watch, the use case ends. A panel that has spent years on one engine will ask what happens when they bring theirs — the 220 hp VRDE is developing right now, or their 65 hp Wankel. Today the answer is "you can't."</p>
+        </div>
+      </section>
+
+      <section id="s2">
+        <div class="sec-head"><span class="sec-num">02</span><h2>What we build instead</h2></div>
+
+        <p class="lede">A DRDO scientist arrives with an engine we have never seen. They describe it to a local AI, answer some questions, wait a few minutes while the system commissions itself against it, and then start running fault tests — with the system stating plainly how much it is entitled to claim.</p>
+
+        <p>That splits the project into two tracks that reuse each other rather than compete:</p>
+
+        <div class="tablewrap">
+          <table>
+            <caption>Two tracks</caption>
+            <thead><tr><th style="width:26%">Track</th><th>Scope</th><th style="width:20%">Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>A — Fidelity</strong></td><td>Make the VRDE 180 twin hold up against real published data: cooling, fuel system, precise sensors, calibration, retrained models.</td><td>Phases 0–3 done</td></tr>
+              <tr><td><strong>B — Framework</strong></td><td>Any engine, described in one file or through the AI; named recorded tests; signed reports; honest trust tiers.</td><td>Proposed here</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>Track B is not a UI reskin. It is the removal of four specific couplings — profile loaded at import, one global sensor package, one global calibration artifact, and a frontend that restates each profile by hand — followed by an evaluator-facing shell on top.</p>
+      </section>
+
+      <section id="s3">
+        <div class="sec-head"><span class="sec-num">03</span><h2>Why this isn't scope drift</h2></div>
+
+        <p>There is a real danger here, and the team should understand it before we commit. The problem statement names <em>one</em> engine. A panel could hear "we support multiple engines" as <em>we didn't solve your problem, we built a tool.</em></p>
+
+        <p>So the framing matters more than the feature:</p>
+
+        <div class="pull">A model that only works on the engine it was tuned to is indistinguishable from a curve fit.</div>
+
+        <p>That is the criticism our whole over-determination thesis exists to answer — and cross-engine transfer is the only way to <em>demonstrate</em> the answer rather than assert it. The same code, unmodified, already closes healthy residuals on the Rotax 914 to <code>|ρ| ≈ 4.4 × 10⁻¹¹</code> with power within +1.4% of its type certificate. That is evidence the method is structural, not fitted.</p>
+
+        <p>It also converts into something the people in the room personally want: <strong>VRDE is developing a 220 hp engine now, and they already have the dyno.</strong> They don't need our engine research. They need the pipeline that turns <em>their</em> measurements into a commissioned health monitor. We aren't offering engine knowledge — we're offering the converter.</p>
+
+        <div class="note">
+          <p><strong>Consequence for the interface:</strong> four engine cards of equal weight makes the weak argument. The landing page leads with the VRDE and its DRDO anchors and trial data, and <em>then</em> shows a validation section: "the same method, unchanged, on three other engines."</p>
+        </div>
+      </section>
+
+      <section id="s4">
+        <div class="sec-head"><span class="sec-num">04</span><h2>What stays constant when a new engine arrives</h2></div>
+
+        <p class="lede">This is the theoretical backbone. If we can state the invariant precisely, "works on any engine" stops being a claim and becomes a consequence.</p>
+
+        <div class="layers">
+          <div class="layer">
+            <span class="layer-tag">Layer 0</span>
+            <div><span class="layer-name">Physical law</span><p>Mass and energy conservation, Newton's second law on rotating inertias, gas property relations. Zero engine dependence, ever.</p></div>
+          </div>
+          <div class="layer">
+            <span class="layer-tag">Layer 1</span>
+            <div><span class="layer-name">Mean-value model structure</span><p>Manifold mass balance by filling-and-emptying, compressor in a forward structure and turbine in a backward one to match sensor availability, 4–6 states. This is already what <code>mvem.py</code> is.</p></div>
+          </div>
+          <div class="layer">
+            <span class="layer-tag">Layer 2</span>
+            <div><span class="layer-name">Dimensionless similarity</span><p>Under defined similarity conditions the dimensionless parameters of a scaled engine match a reference engine. The engine-independent coordinates are BMEP, mean piston speed (practical ceiling ~20 m/s), inlet Mach index, λ and BSFC — not litres and horsepower.</p></div>
+          </div>
+          <div class="layer">
+            <span class="layer-tag">Layer 3</span>
+            <div><span class="layer-name">Diagnostic structure</span><p>Residual generation is algorithmic: one redundancy relation per minimal structurally over-determined set, derived from equation structure alone. ρ is dimensionless and σ-normalised, so "2σ" means the same on any engine. ISO 13374 blocks and the ISO 14224 failure taxonomy are equipment-independent by construction.</p></div>
+          </div>
+          <div class="layer config">
+            <span class="layer-tag">Layer 4</span>
+            <div><span class="layer-name">Configuration — a file, not code</span><p>Cylinder count and arrangement, bore/stroke/CR, aspiration, cooling medium, spark vs compression ignition, fuel, gearbox, propeller type, limits. Already proven: the Rotax runs through identical code.</p></div>
+          </div>
+          <div class="layer code">
+            <span class="layer-tag">Layer 5</span>
+            <div><span class="layer-name">"Revolutionary" — needs code</span><p>Two-stroke needs a scavenging module (delivery ratio, scavenging and trapping efficiency) — moderate, not revolutionary. A Wankel needs chamber geometry and breaks per-cylinder residuals. A gas turbine is a different model family entirely.</p></div>
+          </div>
+        </div>
+
+        <p><strong>Why this scopes cleanly for SIH26054:</strong> the dominant MALE-class architecture is precisely what we already model — four-stroke, heavy-fuel or spark-ignition, turbocharged, geared, constant-speed propeller. Two-stroke and Wankel dominate <em>small</em> UAVs, not this class. Every escape hatch is named and costed instead of hand-waved.</p>
+
+        <div class="pull">What changes is a config file. What would need new code is a two-stroke's scavenging, a rotary's chamber geometry, or a turbine — and we will tell you which one you brought.</div>
+      </section>
+
+      <section id="s5">
+        <div class="sec-head"><span class="sec-num">05</span><h2>What the system will and won't claim</h2></div>
+
+        <p>The hardest question anyone asked during planning: <em>we researched one engine for a week — how can we produce trustworthy absolute numbers for an engine we know nothing about?</em></p>
+
+        <p>The answer is that there are two different kinds of claim, and only one of them needs research:</p>
+
+        <ul>
+          <li><strong>Absolute</strong> — "this engine makes 180 hp at 11,000 ft". Requires published anchors. No anchors, no claim.</li>
+          <li><strong>Differential</strong> — "ρ₁ has deviated 9σ from <em>this engine's own</em> commissioned healthy baseline, and that signature matches injector fouling". Requires no absolute accuracy at all.</li>
+        </ul>
+
+        <p><strong>Fault diagnosis lives entirely in the second category.</strong> Our residuals already subtract the engine's own baseline and divide by its own sigma — so a model that is 15% wrong in absolute power still catches a 2% injector degradation, because the error is common-mode and gets differenced away in the same operation that computes ρ. That is why parity-space diagnosis exists as a discipline.</p>
+
+        <p>So the system declares a tier, and the tier governs what it is allowed to say:</p>
+
+        <div class="tiers">
+          <div class="tier"><div class="t-good"></div><div class="tier-body">
+            <p class="tier-name">Anchored</p>
+            <p class="tier-basis">published field / trial data — VRDE 180 only</p>
+            <p>Absolute values within stated error. Full diagnosis <strong>and</strong> remaining useful life.</p>
+          </div></div>
+          <div class="tier"><div class="t-caution"></div><div class="tier-body">
+            <p class="tier-name">Certificate-anchored</p>
+            <p class="tier-basis">type-certificate ratings — Rotax 914 / 916 iS, Lycoming O-320</p>
+            <p>Absolute within a few percent. Full diagnosis, RUL with widened bounds.</p>
+          </div></div>
+          <div class="tier"><div class="t-limit"></div><div class="tier-body">
+            <p class="tier-name">Self-commissioned</p>
+            <p class="tier-basis">a config file and a commissioning run — no external anchor</p>
+            <p>Absolute values labelled <em>indicative</em>. Diagnosis and residual signatures <strong>fully valid</strong>. <strong>RUL withheld.</strong></p>
+          </div></div>
+        </div>
+
+        <div class="note">
+          <p><strong>Withholding RUL at the bottom tier is deliberate and non-negotiable.</strong> Arrhenius needs a real temperature; Archard needs a real contact load. Refusing to print a number, and explaining why, is worth more to a DRDO scientist than a plausible fabrication. It is the difference between an instrument and a toy.</p>
+        </div>
+
+        <p>And even with zero anchors we can still prove a profile isn't nonsense — energy balance closes, volumetric efficiency in 0.7–1.1, BSFC in the plausible band for the declared cycle (~200–260 g/kWh diesel, ~280–400 spark-ignition), compressor operating point off surge and choke, propeller tip Mach below 0.85. A profile yielding 90 g/kWh is told it is physically implausible, and which check failed.</p>
+      </section>
+
+      <section id="s6">
+        <div class="sec-head"><span class="sec-num">06</span><h2>The experience</h2></div>
+
+        <p>Landing page → local login → <strong>Tests</strong> dashboard → <em>Create test</em> → live run → signed report that stays in the list, reopenable and comparable.</p>
+
+        <h3>Login, and why it isn't theatre</h3>
+        <p>Local operator profiles only — accounts on the machine, no cloud, no external identity provider. A real DRDO system is air-gapped, and a cloud login would be a red flag. Roles make it functional rather than decorative: <strong>Operator</strong> runs and views, <strong>Engineer</strong> injects faults and commissions engines, <strong>Auditor</strong> is read-only with the evidence trail. Every fault injection is stamped with who did it and when — which is how flight-test organisations actually work.</p>
+
+        <h3>A test is a recorded experiment, not a session</h3>
+        <p>Name + engine + mission profile + scheduled fault events. It runs, records every frame, and ends with a report: what was injected, what the system detected, <strong>detection lead time</strong>, false alarms per flight hour, missed detections, and the residual evidence trail. Tests are listed, reopened, compared side by side and exported.</p>
+
+        <div class="note">
+          <p>Those are precisely the Saxena PHM metrics our validation documents currently promise and do not yet produce. Building the report is how we stop promising them.</p>
+        </div>
+
+        <h3>Engines you can pick</h3>
+        <div class="tablewrap">
+          <table>
+            <caption>Four shipped profiles, chosen to span real architectural axes</caption>
+            <thead><tr><th>Engine</th><th>Why it is in the set</th><th>Basis</th></tr></thead>
+            <tbody>
+              <tr><td><strong>VRDE 180</strong></td><td>The problem-statement target. Turbo-diesel, liquid-cooled, geared, constant-speed prop.</td><td>DRDO published</td></tr>
+              <tr><td><strong>Rotax 914</strong></td><td>Already in-tree and validated to +1.4%. Flies on Indian platforms — Nishant, TAPAS prototypes.</td><td>EASA TCDS</td></tr>
+              <tr><td><strong>Rotax 916 iS</strong></td><td>The latest engine in the set — 2023. 160 hp, 1352 cc turbo, 2.54:1 gearbox, critical altitude 15,000 ft. Proves the framework generalises within a family, cheaply.</td><td>Rotax datasheet</td></tr>
+              <tr><td><strong>Lycoming O-320</strong></td><td>The structural stress case: naturally aspirated, air-cooled, direct drive. Exercises the no-turbo, no-gearbox path our physics has never run.</td><td>FAA TCDS E-274</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><strong>Rejected candidates, documented with reasons</strong> — answering "why not this one?" is worth more than silence. The <strong>DeltaHawk DHK180</strong> (FAA certified April 2023, 180 hp Jet-A, same class as VRDE) is a two-stroke, so it needs a new cycle branch rather than a config file. DRDO's own <strong>65 hp Wankel</strong> is a rotary, so per-cylinder residuals collapse. The <strong>VRDE 220</strong> has almost no published data and would be an assumption dressed as a profile.</p>
+      </section>
+
+      <section id="s7">
+        <div class="sec-head"><span class="sec-num">07</span><h2>How "add your own engine" actually works</h2></div>
+
+        <p class="lede">One file the human writes. Everything else the machine generates.</p>
+
+        <h3>The AI conducts the interview — it does not compute the physics</h3>
+        <p>This distinction is the whole design. A local model guessing parameter values would lose to <code>scipy.optimize</code>, and a calibration-literate judge would call it a gimmick. The physics is deterministic and published:</p>
+
+        <div class="tablewrap">
+          <table>
+            <caption>What gets derived rather than asked</caption>
+            <thead><tr><th style="width:26%">Value</th><th>How</th></tr></thead>
+            <tbody>
+              <tr><td>Compressor map</td><td>Superellipse per speedline, encoded as a compact vector (surge, choke, curvature, shape), parameterised <em>from limited design-point data</em> — under 2.5% mean error in the normal operating range.</td></tr>
+              <tr><td>Friction (FMEP)</td><td>Chen–Flynn: <code>A + B·pmax + C·Sf + D·Sf²</code> — needs only peak cylinder pressure and mean piston speed, both derivable from geometry. ~4.5% average deviation.</td></tr>
+              <tr><td>Volumetric efficiency</td><td>Taylor Mach-index correlation from bore, stroke, rpm, manifold pressure and intake temperature.</td></tr>
+              <tr><td>Ratings, limits, fuel, oil</td><td>For certified engines, the type certificate data sheet is already a standardised field set. (Bore, stroke and CR are <em>not</em> guaranteed TCDS fields — those stay direct questions.)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>So the model's real jobs are: conduct an adaptive interview, map messy human answers onto schema fields, explain what is missing and why it matters, and narrate the wait.</p>
+
+        <h3>Invalid files are made impossible, not caught afterwards</h3>
+        <p>Grammar-constrained decoding masks any token that would make the output invalid <em>before</em> sampling, so malformed YAML cannot be generated at all — no parse errors, no retries, no fallback parser. The grammar is generated from our own schema so the two cannot drift. <strong>An 8B model writing into a locked grammar is safer than a 14B writing free-form YAML</strong>, which is why model size is not the bottleneck here.</p>
+
+        <h3>Asking, and the guardrail on guessing</h3>
+        <p>The AI derives what physics allows and asks what it cannot derive — and asks all the important things, because configurations genuinely differ. Where it must estimate by analogy, three provenance levels stay strictly separate:</p>
+        <ul>
+          <li><span class="chip chip-have">derived</span> from a published correlation, carries the citation, counts toward absolute claims.</li>
+          <li><span class="chip chip-new">ai_estimated</span> proposed by analogy. <strong>Requires confirmation, renders visibly weaker, barred from the upper tiers and from ever contributing to an RUL figure.</strong> A model prior is not engineering data.</li>
+          <li><span class="chip chip-part">user_supplied</span> typed by the operator, with any stated source.</li>
+        </ul>
+
+        <h3>The questions aren't a fixed form</h3>
+        <p>A required core is always asked — cylinders, configuration, displacement, bore, stroke, compression ratio, aspiration, rated power and rpm, fuel, cooling, gearbox, propeller — because the physics cannot run without it. Beyond that the AI chooses from the declared architecture: a turbo engine is asked for its design point; a naturally aspirated one is never asked about wastegates. Depth follows the stated purpose — a quick look lands at the bottom tier with wide bands; a serious test keeps probing the channels that matter for the faults you care about.</p>
+
+        <h3>Then it takes time, and says so</h3>
+        <p>Writing the file takes seconds. Commissioning is the real cost: a sigma bootstrap across nine operating points, a gate sweep across eleven altitudes, the healthy baseline recorded, the tier assigned. We show a live log naming the physics as it runs — <em>"operating point 4 of 9 · sigma channel 7 of 13"</em> — rather than a spinner, because visible physics is more convincing and more honest about where the minutes go.</p>
+
+        <div class="warn">
+          <span class="warn-label">Discipline</span>
+          <p>We measure commissioning wall-time before we ever display a duration. No invented "about 5 minutes".</p>
+        </div>
+      </section>
+
+      <section id="s8">
+        <div class="sec-head"><span class="sec-num">08</span><h2>What we already have vs. what is new</h2></div>
+
+        <p>Most of this exists. That is the argument for attempting it.</p>
+
+        <div class="tablewrap">
+          <table>
+            <caption>Honest split</caption>
+            <thead><tr><th style="width:34%">Capability</th><th style="width:16%">Status</th><th>Detail</th></tr></thead>
+            <tbody>
+              <tr><td>Engine physics (MVEM)</td><td><span class="chip chip-have">have</span></td><td>Cooling loop, gearbox, constant-speed prop, governor, wastegate. Runs two engines already.</td></tr>
+              <tr><td>Data generation</td><td><span class="chip chip-have">have</span></td><td>The plant model <em>is</em> the generator. No user data is ever required to run the system.</td></tr>
+              <tr><td>Sigma bootstrap &amp; gates</td><td><span class="chip chip-have">have</span></td><td><code>sigma_generator.py</code>, <code>gates_check.py</code> — commissioning reuses them.</td></tr>
+              <tr><td>Residuals &amp; diagnosis</td><td><span class="chip chip-have">have</span></td><td>13 parity residuals, incidence matrix, novelty detection, trained models.</td></tr>
+              <tr><td>Profile loading</td><td><span class="chip chip-part">partial</span></td><td><code>load_engine_profile()</code> already accepts any filename; callers hardcode one.</td></tr>
+              <tr><td>Schema &amp; validation</td><td><span class="chip chip-new">new</span></td><td>No schema exists. Validation today is <code>KeyError</code> on access — and a missing sensor channel fails <em>mid-run</em>, not at load.</td></tr>
+              <tr><td>Per-engine calibration</td><td><span class="chip chip-new">new</span></td><td>One global sigma file today. Each engine needs its own, plus a refusal to run uncommissioned.</td></tr>
+              <tr><td>Commissioning pipeline</td><td><span class="chip chip-new">new</span></td><td>One command: validate → sweep → sigma → baseline → gates → report.</td></tr>
+              <tr><td>Test sessions &amp; reports</td><td><span class="chip chip-new">new</span></td><td>No persistence at all today — close the tab and the run is gone.</td></tr>
+              <tr><td>App shell</td><td><span class="chip chip-new">new</span></td><td>There is no router. The app mounts straight into the dashboard.</td></tr>
+              <tr><td>AI onboarding</td><td><span class="chip chip-new">new</span></td><td>Interview, grammar-constrained generation, advisor role.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="warn">
+          <span class="warn-label">Hidden cost the team should know about</span>
+          <p>The number <strong>13</strong> — our residual count — is hardcoded in at least five places across backend, ML and frontend, plus every model's input dimension. Letting each engine have its own residual set is a schema-and-model-shape change, the same class of work as our recent 11→13 pass, only parameterised.</p>
+        </div>
+      </section>
+
+      <section id="s9">
+        <div class="sec-head"><span class="sec-num">09</span><h2>Build phases</h2></div>
+
+        <p>Ordered so that the parts everything else depends on come first, and nothing waits on an unresolved decision.</p>
+
+        <div class="tablewrap">
+          <table>
+            <caption>Sequence</caption>
+            <thead><tr><th style="width:8%">#</th><th style="width:30%">Phase</th><th>What it delivers</th></tr></thead>
+            <tbody>
+              <tr><td><strong>B0</strong></td><td>Break the couplings</td><td>Engine becomes per-run, not per-process. Limits become declared data instead of fixed key names. Mission becomes data. Profile served to the frontend instead of duplicated.</td></tr>
+              <tr><td><strong>B1</strong></td><td>Schema + friendly validator</td><td>One JSON Schema, a commented template, physical plausibility checks, and errors that name the key, the unit and a worked example. Fail at load, never mid-run.</td></tr>
+              <tr><td><strong>B2</strong></td><td>Commissioning pipeline</td><td><code>commission_engine.py</code> — one command to a signed commissioning report with sigma, confidence intervals, the engine's own incidence matrix and its unresolved assumptions.</td></tr>
+              <tr><td><strong>B3</strong></td><td>Test sessions + reports</td><td>SQLite store, recorded frames, server-side report generation with detection lead time and false-alarm rates.</td></tr>
+              <tr><td><strong>B4</strong></td><td>App shell</td><td>Landing, login, tests list, create-test wizard, live run, report. The first router in the codebase.</td></tr>
+              <tr><td><strong>B5</strong></td><td>Cross-engine ML transfer</td><td>Train on VRDE, evaluate on the others with zero retraining. Publish whatever comes out, failures included.</td></tr>
+              <tr><td><strong>B6</strong></td><td>Docs + evidence surface</td><td>Engine catalogue with citations, "how to add an engine", and validation evidence readable inside the app.</td></tr>
+              <tr><td><strong>B7</strong></td><td>AI onboarding</td><td>The interview, grammar-constrained generation, the advisor role, live commissioning progress.</td></tr>
+              <tr><td><strong>B8</strong></td><td>Structural residual derivation</td><td>Derive each engine's residual set from its equation structure and declared sensors, rather than hardcoding ours.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note">
+          <p><strong>B0 and B1 depend on none of the open decisions below.</strong> They are pure decoupling and schema work, so they are a clean first move whenever we start. Everything else can wait for the team.</p>
+        </div>
+      </section>
+
+      <section id="s10">
+        <div class="sec-head"><span class="sec-num">10</span><h2>Open decisions for the team</h2></div>
+
+        <p>Five things genuinely undecided. Each changes what we build.</p>
+
+        <div class="decision">
+          <h3>1. What data format does calibration accept?</h3>
+          <p>ASAM MDF/MF4 is the industry measurement format — OEM powertrain test benches record in it, and it is the same format used for CAN logging, with a mature Python reader. A documented CSV is what anyone can produce by hand.</p>
+          <p class="rec">▸ Recommendation: CSV as primary, MF4 behind the same reader interface. One dependency, and it doubles as our CAN path.</p>
+        </div>
+
+        <div class="decision">
+          <h3>2. How do we demonstrate calibration with no real dyno data?</h3>
+          <p>Nobody can hand us test-cell data on the day. We can generate a dyno sheet from our own twin with deliberately perturbed parameters and show the calibrator recovering them from data it never saw.</p>
+          <p class="rec">▸ Recommendation: do exactly that, and label it explicitly as a self-recovery test rather than field validation — with the Rotax and Lycoming certificate ratings as the genuine external check.</p>
+        </div>
+
+        <div class="decision">
+          <h3>3. How deep does the uncertainty layer go?</h3>
+          <p>Staged least-squares fitting is the workhorse. Adding constrained Bayesian optimisation would produce real confidence intervals on fitted parameters, which feed the trust tiers and RUL bounds directly — the most serious option, and the most work.</p>
+          <p class="rec">▸ Recommendation: decide once B2 is running and we can see how much time remains.</p>
+        </div>
+
+        <div class="decision">
+          <h3>4. How does ML transfer align engines with different residual sets?</h3>
+          <p>If two engines close different parity relations, does the classifier train on the intersection of relations, or on a full-width vector with missing channels masked?</p>
+          <p class="rec">▸ Must be settled <strong>before</strong> generating per-engine datasets, or we generate them twice.</p>
+        </div>
+
+        <div class="decision">
+          <h3>5. Which machine do we rehearse on?</h3>
+          <p>Development happens on an 8 GB M3, which caps at roughly an 8B model. The target demo host is 16 GB, which comfortably runs a 14B. A 30B mixture-of-experts stays out of reach regardless, since all weights must be resident even when few are active.</p>
+          <p class="rec">▸ Whatever we choose, the 8B path must stay genuinely rehearsed — the demo host must not be the first time the larger model ever runs.</p>
+        </div>
+      </section>
+
+      <section id="s11">
+        <div class="sec-head"><span class="sec-num">11</span><h2>Risks and honest limits</h2></div>
+
+        <h3>The circularity trap — we must name it before a scientist finds it</h3>
+        <p>In simulation mode the plant and the twin are the same model from the same file, differing only in seed and injected faults. So residuals are model-versus-model. They validate <strong>the diagnostic method</strong> — does a fault produce the predicted signature, how fast is detection — but they <strong>cannot</strong> validate the model against reality. If we blur those two, the whole project reads as circular and we deserve to lose.</p>
+
+        <p>The answer, said before being asked: <em>"In simulation mode we are testing the diagnostic method, not the engine model. The engine model is validated separately — against DRDO's published lapse data on the VRDE, and against type certificates on the Rotax and Lycoming. For your engine the method transfers; absolute accuracy is yours to establish with your dyno data, and here is the one command that does it."</em></p>
+
+        <h3>Other risks we are carrying deliberately</h3>
+        <ul>
+          <li><strong>Track B crowding out the physics.</strong> B0 and B1 are about a week and unblock everything. If time compresses, ship the framework and defer the login shell — the framework is the differentiator, the landing page is polish.</li>
+          <li><strong>Someone uploads a nonsense engine and we produce confident garbage.</strong> Plausibility checks reject the impossible, anything assumed warns rather than errors, and an uncommissioned engine <em>refuses to run</em> rather than borrowing another engine's calibration. That refusal is a feature, and the interface must say why.</li>
+          <li><strong>Four profiles multiply the calibration surface.</strong> Commissioning is automated and its report is the artifact. Only the VRDE gets the full anchor treatment; the others get self-consistency reports, clearly labelled as such.</li>
+          <li><strong>Three fabricated interface claims still in the current build</strong> — a mission "Monte Carlo" figure, active-probe constants, and constant "virtual sensors". These must be relabelled before any of this ships.</li>
+        </ul>
+
+        <div class="pull">A system that knows its own boundary is worth more than one that claims not to have one.</div>
+      </section>
+
+      <footer>
+        <p>Working document for team discussion — not a specification. Every figure here traces to a published source, a measurement through our own model, or is labelled as an assumption. Nothing described has been built yet.</p>
+      </footer>
+
+    </main>
+  </div>
+</div>
+<style>@page{size:A4;margin:14mm 13mm}@media print{body{background:#fff!important;font-size:10.5pt;line-height:1.5}.shell{max-width:none;padding:0}.rail{display:none}.frame{display:block}.masthead{padding-block:0 16px}section{margin-bottom:20px}h1{font-size:28pt}h2{font-size:14pt}.standfirst{font-size:12pt}.lede{font-size:11.5pt}.sec-head,h3{break-after:avoid}table{min-width:0;font-size:8.5pt}.tablewrap{overflow:visible;break-inside:avoid}.note,.warn,.decision,.tier,.layer,.pull,.tiers{break-inside:avoid}.pull{font-size:13pt}a{color:#14606B;text-decoration:none}}</style>
+</body></html>

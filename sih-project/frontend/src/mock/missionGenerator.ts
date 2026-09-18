@@ -604,7 +604,16 @@ function makeTick(
   const unmodelled = cfg.unmodelled && t >= cfg.unmodelled.startT
     ? (t - cfg.unmodelled.startT) * cfg.unmodelled.rate
     : 0;
-  const rhoVec = [rho1, rho2, null, rho4, rho5, ...rho6_9, rho10, rho11];
+  // THERMAL CLOSURES (rho12 coolant, rho13 head temperature). The mock has no
+  // coolant loop — the real plant grew one on 2026-09-16 — so these are driven
+  // off the same hA_scale the mock already uses for a cooling fault, scaled so
+  // a full-severity cooling fault reads in the same order of sigma as the
+  // backend produces. SIMULATED is a demo path, not a second physics model;
+  // when the two disagree the backend is authoritative.
+  const coolingSeverity = 1 - trueS.hA_scale;
+  const rho12 = coolingSeverity * 18 + noise(0.9);
+  const rho13 = coolingSeverity * 26 + noise(0.5);
+  const rhoVec = [rho1, rho2, null, rho4, rho5, ...rho6_9, rho10, rho11, rho12, rho13];
   if (unmodelled > 0) {
     for (let i = 0; i < rhoVec.length; i++) {
       if (rhoVec[i] !== null) rhoVec[i] = (rhoVec[i] as number) + NULL_DIR[i] * unmodelled;
@@ -821,6 +830,8 @@ function makeTick(
       rho6_9_cyl_dev: rhoVec.slice(5, 9) as number[],
       rho10_oil: rhoVec[9] as number,
       rho11_ripple: rhoVec[10] as number,
+      rho12_coolant: rhoVec[11] as number,
+      rho13_head_temp: rhoVec[12] as number,
     },
     novelty: {
       index: nov.index,

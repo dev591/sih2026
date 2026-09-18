@@ -77,14 +77,14 @@ class LSTMDecoder(nn.Module):
 
 class LSTMAutoencoder(nn.Module):
     """
-    LSTM autoencoder that operates on windows of ρ ∈ R^(T × 11).
+    LSTM autoencoder that operates on windows of ρ ∈ R^(T × 13).
 
     Reconstruction error per-window is used as the anomaly score.
     """
 
     def __init__(
         self,
-        input_dim: int = 11,
+        input_dim: int = 13,
         hidden_dim: int = 64,
         latent_dim: int = 16,
         seq_len: int = 32,
@@ -96,9 +96,9 @@ class LSTMAutoencoder(nn.Module):
         self.decoder = LSTMDecoder(latent_dim, hidden_dim, input_dim, seq_len, num_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, 11)
+        # x: (B, T, 13)
         z = self.encoder(x)             # (B, latent_dim)
-        x_hat = self.decoder(z)         # (B, T, 11)
+        x_hat = self.decoder(z)         # (B, T, 13)
         return x_hat
 
     def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:

@@ -148,7 +148,7 @@ class RULModel(nn.Module):
         p10, p50, p90 = rul_model.predict(window_tensor)
     """
 
-    def __init__(self, input_dim: int = 11, seq_len: int = 32, feature_dim: int = 256):
+    def __init__(self, input_dim: int = 13, seq_len: int = 32, feature_dim: int = 256):
         super().__init__()
         # Mirror of ResidualCNNEncoder in m3_classifier
         self.conv = nn.Sequential(
@@ -161,7 +161,7 @@ class RULModel(nn.Module):
         self.rul_head = QuantileRULHead(feature_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, 11) → permute for Conv1d
+        # x: (B, T, 13) → permute for Conv1d
         h = self.conv(x.permute(0, 2, 1)).flatten(1)   # (B, 256)
         return self.rul_head(h)                          # (B, 3)
 

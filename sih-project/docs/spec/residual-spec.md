@@ -144,23 +144,50 @@ Because each relation is built from a known subset of sensors and a known piece
 of physics, the effect of any fault on any relation is **derivable, not
 asserted from experience.**
 
-| Fault mode | ρ₁ | ρ₂ | ρ₃ | ρ₄ | ρ₅ | ρ₆₋₉ | ρ₁₀ | ρ₁₁ |
-|---|---|---|---|---|---|---|---|---|
-| Ring wear / blow-by | ↑ | ↑ | ↑ | ↑ | ↑ | · | ↓ | · |
-| Compressor fouling | ⇓ | · | · | ↑ | · | · | · | · |
-| Injector fouling, cyl *i* | · | ⇓ | · | ↑ | · | ⇑ | · | ⇑ |
-| Fuel filter / rail loss | · | ⇓ | · | ↑ | ↓ | · | · | · |
-| Ignition misfire, cyl *i* | · | · | · | ⇑ | ↓ | ⇓ | · | ⇑ |
-| Cooling degradation | · | · | · | ↑ | · | ↑ | ↑ | · |
-| Oil leak / pump wear | · | · | · | · | ↑ | · | ⇓ | · |
-| Bearing wear | · | · | · | ↑ | ⇑ | · | ↓ | · |
-| Detonation / pre-ignition | · | · | · | ↑ | · | ⇑ | · | ⇑ |
-| **MAP sensor drift** | ⇑ | ↑ | ↑ | ↑ | · | · | · | · |
-| **EGT sensor drift, cyl *i*** | · | · | · | ↑ | · | ⇑ | · | · |
-| **Lambda sensor drift** | · | ⇑ | · | · | · | · | · | · |
+| Fault mode | ρ₁ | ρ₂ | ρ₃ | ρ₄ | ρ₅ | ρ₆₋₉ | ρ₁₀ | ρ₁₁ | ρ₁₂ | ρ₁₃ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Ring wear / blow-by | ↑ | ↑ | ↑ | ↑ | ↑ | · | ↓ | · | · | ↓ |
+| Compressor fouling | ⇓ | · | · | ↑ | · | · | · | · | · | · |
+| Injector fouling, cyl *i* | · | ⇓ | · | ↑ | · | ⇑ | · | ⇑ | ↓ | ⇓ |
+| Fuel filter / rail loss | · | ⇓ | · | ↑ | ↓ | · | · | · | ↓ | ⇓ |
+| Ignition misfire, cyl *i* | · | · | · | ⇑ | ↓ | ⇓ | · | ⇑ | ↓ | ⇓ |
+| Cooling degradation (radiator) | · | · | · | ↑ | · | ↑ | ↑ | · | ⇑ | ⇑ |
+| **Coolant pump degradation** | · | · | · | ↑ | · | · | · | · | ↓ | ⇑ |
+| Oil leak / pump wear | · | · | · | · | ↑ | ⇓ | · | · | · | · |
+| Bearing wear | · | · | · | ↑ | ⇑ | · | ↓ | · | · | ↑ |
+| Detonation / pre-ignition | · | · | · | ↑ | · | ⇑ | · | ⇑ | · | ⇑ |
+| **MAP sensor drift** | ⇑ | ↑ | ↑ | ↑ | · | · | · | · | · | · |
+| **EGT sensor drift, cyl *i*** | · | · | · | ↑ | · | ⇑ | · | · | · | · |
+| **CHT sensor drift, cyl *i*** | · | · | · | · | · | ⇑ | · | · | · | ⇑ |
+| **Lambda sensor drift** | · | ⇑ | · | · | · | · | · | · | · | · |
 
-⇑ strong positive · ↑ weak positive · ⇓↓ negative · `·` unexcited.
-**Component faults above the rule, instrumentation faults below it.**
+⇑ strong positive · ↑ weak positive · ⇓↓ negative · `·` unexcited.**Component faults above the rule, instrumentation faults below it.**
+
+### ρ₁₂ and ρ₁₃ — why the vector grew to thirteen (2026-09-17)
+
+ρ₆–ρ₉ are deviations from the **cross-cylinder mean**, so sum-to-zero is a
+property of their definition. A cooling fault heats all four cylinders equally
+and therefore cancels out of them **identically** — and ρ₄'s heat-rejection term
+uses the measured coolant temperature, so the first law still closes when the
+coolant runs hot. The consequence was measured, not supposed: with the radiator
+degraded at hot-day take-off the plant's coolant went 97.8 → 119.2 °C and peak
+head temperature 176.6 → 196.1 °C, while the largest residual response was ρ₁₀
+at −9.7 σ. ρ₁₀ is the **oil** channel, which bearing wear and oil-pump wear
+already own — so the twin would have reported an oil fault on an engine that was
+cooking its cylinder heads.
+
+Two channels rather than one, because two **isolate** where one merely detects:
+
+| | ρ₁₂ coolant | ρ₁₃ head temperature |
+|---|---|---|
+| Blocked / fouled radiator | ⇑ | ⇑ |
+| Degraded coolant pump | · | ⇑ |
+| Drifting CHT probe | · | ⇑ (no corroboration elsewhere) |
+
+Both are **model-comparison** residuals (measured against the twin's
+prediction), the same family as ρ₁₀ — not parity relations between two
+independent estimates. They carry information because the twin integrates
+NOMINAL parameters while the plant runs the faulted ones.
 
 ### The isolation principle
 

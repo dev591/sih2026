@@ -116,7 +116,7 @@ export function ResidualHeatmap() {
   };
 
   return (
-    <Panel title="Parity residuals" subtitle={`ρ₁–ρ₁₁ · last ${WINDOW}s · σ units`}>
+    <Panel title="Parity residuals" subtitle={`ρ₁–ρ₁₃ · last ${WINDOW}s · σ units`}>
       <div className="heatmap">
         {RESIDUAL_ROWS.map((meta, r) => (
           <div className="heat-row" key={meta.key}>

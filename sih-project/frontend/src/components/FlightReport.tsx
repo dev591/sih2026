@@ -126,7 +126,7 @@ export function FlightReport() {
                 <th>Mission elapsed</th><td>T+{clock(slow.t)}</td>
               </tr>
               <tr>
-                <th>Assessment basis</th><td>Parity residual vector ρ₁–ρ₁₁</td>
+                <th>Assessment basis</th><td>Parity residual vector ρ₁–ρ₁₃</td>
                 <th>Normalisation</th><td>Healthy-data σ units</td>
               </tr>
               <tr>

@@ -50,7 +50,7 @@ class ResidualCNNEncoder(nn.Module):
         self.feature_dim = 96 * 4      # 384
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, 11)
+        # x: (B, T, 13)
         #
         # SCALE-NORMALISE THE WINDOW FIRST. Which fault it is lives in the
         # DIRECTION of rho; magnitude carries severity, a nuisance variable
@@ -106,7 +106,7 @@ def _build_incidence_matrix() -> np.ndarray:
         v = np.array(INCIDENCE[name], dtype=float)
         n = np.linalg.norm(v)
         cols.append(v / n if n > 1e-9 else v)
-    return np.column_stack(cols)   # (11, n_faults)
+    return np.column_stack(cols)   # (13, n_faults)
 
 
 _F_NORM = _build_incidence_matrix()
@@ -115,7 +115,7 @@ _F_NORM = _build_incidence_matrix()
 def incidence_match(rho: np.ndarray) -> np.ndarray:
     """
     Cosine similarity between live residual vector and each fault signature.
-    rho : (11,)  in sigma units
+    rho : (13,)  in sigma units
     Returns (n_faults,) in [-1, 1]
     """
     rho_norm = rho / (np.linalg.norm(rho) + 1e-9)

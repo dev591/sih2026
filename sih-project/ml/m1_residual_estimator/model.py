@@ -29,8 +29,8 @@ Input vector u (10 features):
      turbo_rpm, comp_out_p_hPa, comp_out_T_K,
      altitude_ft, tas_mps]
 
-Output ŷ (11 targets — the expected residual baseline, nominally zero):
-    [rho1..rho11]  in normalised (sigma) units
+Output ŷ (13 targets — the expected residual baseline, nominally zero):
+    [rho1..rho13]  in normalised (sigma) units
 """
 
 from __future__ import annotations
@@ -121,11 +121,18 @@ def mvem_predict(u: torch.Tensor) -> torch.Tensor:
     # ── ρ₁₁ crank ripple — stub ──────────────────────────────────────────
     rho11 = torch.zeros_like(rpm)
 
+    # rho12 (coolant closure) and rho13 (head-temperature closure) have no
+    # counterpart in this stub — it carries no thermal model — so they are zero
+    # and the neural correction carries them entirely. Stated rather than
+    # hidden: this stub computes only rho2 and zeroes the rest.
+    rho12 = torch.zeros_like(rpm)
+    rho13 = torch.zeros_like(rpm)
+
     return torch.stack(
         [rho1, rho2, rho3, rho4, rho5,
-         rho6, rho7, rho8, rho9, rho10, rho11],
+         rho6, rho7, rho8, rho9, rho10, rho11, rho12, rho13],
         dim=1
-    )   # (B, 11)
+    )   # (B, 13)
 
 
 # ── Neural correction g_NN ─────────────────────────────────────────────────
@@ -136,7 +143,7 @@ class CorrectionMLP(nn.Module):
     Output: correction Δ ∈ R^11
     """
 
-    def __init__(self, input_dim: int = 10, hidden: int = 64, output_dim: int = 11):
+    def __init__(self, input_dim: int = 10, hidden: int = 64, output_dim: int = 13):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden),
@@ -170,7 +177,7 @@ class M1ResidualEstimator(nn.Module):
 
     def __init__(self, input_dim: int = 10, hidden: int = 64):
         super().__init__()
-        self.correction = CorrectionMLP(input_dim, hidden, output_dim=11)
+        self.correction = CorrectionMLP(input_dim, hidden, output_dim=13)
 
     def forward(self, u: torch.Tensor) -> torch.Tensor:
         """
@@ -180,7 +187,7 @@ class M1ResidualEstimator(nn.Module):
 
         Returns
         -------
-        y_hat : (B, 11)  predicted sensor outputs (in residual sigma units)
+        y_hat : (B, 13)  predicted sensor outputs (in residual sigma units)
         """
         physics_pred = mvem_predict(u)          # (B, 11)  — MVEM baseline
         correction   = self.correction(u)       # (B, 11)  — NN delta
@@ -205,7 +212,7 @@ def physics_loss(
 
     Parameters
     ----------
-    y_hat : (B, 11)  model predictions
+    y_hat : (B, 13)  model predictions
     u     : (B, 10)  operating-point features (fuel flow at index 3)
     """
     # λ₁ — energy residual ρ₄ should be near zero.

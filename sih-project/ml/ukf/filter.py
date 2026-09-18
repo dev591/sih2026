@@ -116,8 +116,8 @@ class HealthUKF:
         # Process noise covariance
         self.Q = np.eye(n) * self.cfg.q_theta
 
-        # Observation noise covariance (11 residuals, each ≈ N(0,1))
-        self.R = np.eye(11) * self.cfg.r_diag
+        # Observation noise covariance (13 residuals, each ≈ N(0,1))
+        self.R = np.eye(13) * self.cfg.r_diag
 
         # Track NIS for sensor-fault discrimination
         self._nis_history: list[float] = []
@@ -171,7 +171,7 @@ class HealthUKF:
         # compressor path), cd_inj_i affects ρ₂ and ρ₆₋₉ etc.
         # For the stub, use a hand-coded sensitivity that matches the physics.
         delta = theta - THETA_NOM
-        rho = np.zeros(11)
+        rho = np.zeros(13)
 
         # η_v deviation → ρ₁ (speed-density over-reads when η_v drops)
         rho[0] += -3.0 * delta[0]           # rho1
@@ -185,6 +185,12 @@ class HealthUKF:
         for c in range(4):
             rho[5 + c] += -0.6 * delta[2]   # rho6..rho9 run hot as hA falls
         rho[9] += -0.8 * delta[2]           # rho10
+        # hA is the head-to-coolant conductance: as it falls the heads run hot
+        # against the twin's prediction, which is rho13. The coolant loop itself
+        # (rho12) barely moves for a conductance loss — that asymmetry is the
+        # pump-vs-radiator discriminator and belongs in the observation model
+        # too, or the filter cannot explain a thermal residual with any theta.
+        rho[12] += -2.0 * delta[2]          # rho13
 
         # cd_inj_i → ρ₂ (aggregate fuel/lambda) and per-cylinder ρ₆-9.
         # Fouling REDUCES the discharge coefficient; the incidence table puts
@@ -194,6 +200,7 @@ class HealthUKF:
         for c, idx in enumerate([3, 4, 5, 6]):
             rho[1]    += 2.0 * delta[idx]   # rho2
             rho[5 + c] += -2.0 * delta[idx] # rho6..rho9
+            rho[12]   += -0.3 * delta[idx]  # rho13: one cold cylinder pulls the mean
         # f_fric → ρ₅
         rho[4] += 2.0 * delta[7]            # rho5
 
@@ -205,7 +212,7 @@ class HealthUKF:
 
         Parameters
         ----------
-        rho_measured : (11,) — live parity residual vector in sigma units.
+        rho_measured : (13,) — live parity residual vector in sigma units.
                        NaN for unavailable channels (treated as missing).
 
         Returns
@@ -227,16 +234,16 @@ class HealthUKF:
 
         # ── UPDATE ────────────────────────────────────────────────────────
         # Map sigma points through h
-        z_sp = np.array([self._h(sp[i]) for i in range(2 * n + 1)])  # (2n+1, 11)
+        z_sp = np.array([self._h(sp[i]) for i in range(2 * n + 1)])  # (2n+1, 13)
 
         # Handle missing channels
         obs_mask = ~np.isnan(rho_measured)
         z_meas = np.where(obs_mask, rho_measured, 0.0)
 
-        z_pred = (self.Wm[:, None] * z_sp).sum(axis=0)               # (11,)
+        z_pred = (self.Wm[:, None] * z_sp).sum(axis=0)               # (13,)
 
         Pzz = self.R.copy()
-        Pxz = np.zeros((n, 11))
+        Pxz = np.zeros((n, 13))
         for i in range(2 * n + 1):
             dz = z_sp[i] - z_pred
             dx = theta_pred[i] - mean_pred
@@ -251,9 +258,9 @@ class HealthUKF:
             Pzz_used[i, i] = 1.0            # avoid singular matrix
 
         try:
-            K = Pxz @ np.linalg.inv(Pzz_used)  # Kalman gain (n, 11)
+            K = Pxz @ np.linalg.inv(Pzz_used)  # Kalman gain (n, 13)
         except np.linalg.LinAlgError:
-            K = np.zeros((n, 11))
+            K = np.zeros((n, 13))
 
         # Missing channels were given a unit diagonal above purely to keep Pzz
         # invertible. Their gain columns must be zeroed or the covariance update

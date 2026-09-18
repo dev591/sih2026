@@ -221,6 +221,16 @@ parity_paths:
 parity_calibration:
   provenance: calibrated
   reference_condition: "10,000 ft ISA, 72% throttle, 120 s steady-state"
+  # RE-COMMISSIONED 2026-09-17 for the 13-element vector (rho12 coolant
+  # closure, rho13 head-temperature closure were added that day). Re-run at the
+  # SAME reference condition recorded above; channels 1-11 reproduced their
+  # committed values to ~1e-11, which is the check that the condition is
+  # genuinely reproducible and that these are measurements rather than padding.
+  #   rho12 is null: this engine has no coolant loop (hybrid air/liquid), so
+  #                  the channel has no sensor and reports nothing.
+  #   rho13 = -0.3997 degC: a real healthy offset from the per-probe CHT
+  #                  tolerances, which is exactly the repeatable bias this
+  #                  baseline exists to remove.
   baseline_rho:
     - -0.0060879194
     - -0.0067183149
@@ -232,7 +242,9 @@ parity_calibration:
     - -0.3202600300
     - 0.1354037929
     - 0.0547427178
-    - 0.0
+    - 0.0000000000
+    - null
+    - -0.3997458156
 
 # ---------------------------------------------------------------------------
 # ENVIRONMENT PRESETS

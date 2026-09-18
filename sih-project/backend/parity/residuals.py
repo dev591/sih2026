@@ -1,18 +1,56 @@
 """
-PRAMANA — parity residual vector ρ ∈ ℝ¹¹.
+PRAMANA — parity residual vector ρ ∈ ℝ¹³.
 
 ρ = measured − predicted (what physics says it should read).
 Nominal value is zero. Departures identify fault location.
 
-All eleven residuals are computed here. ρ₃ is returned as None when
+All thirteen residuals are computed here. ρ₃ is returned as None when
 parity_paths.intake_restriction is False (the VRDE is unthrottled; the current
 Rotax telemetry also lacks the separate restriction sensors). Everything
 downstream handles None gracefully.
 
 If sigma_vec is supplied, each non-None element is divided by its healthy
-σ to produce a dimensionless Z-score. The sigma floor of 0.05 prevents
-channels that are structurally near-zero at healthy steady state (ρ₁, ρ₅)
-from amplifying noise into very large numbers under small deviations.
+σ to produce a dimensionless Z-score.
+
+ρ₁₂ AND ρ₁₃ — THE THERMAL CLOSURES, added 2026-09-16.
+------------------------------------------------------
+A cooling fault was invisible to ρ₁–ρ₁₁, and not by accident:
+
+  * ρ₆–ρ₉ are deviations from the CROSS-CYLINDER MEAN. A blocked radiator or a
+    failing coolant pump heats all four cylinders equally, so it cancels out of
+    them identically — sum-to-zero is a property of the definition.
+  * ρ₄'s heat-rejection term uses the MEASURED coolant temperature (correct in
+    itself), so the first law still closes when the coolant runs hot.
+
+Measured before the fix, at hot-day take-off with the radiator at rate 0.08/min:
+the plant's coolant went 97.8 → 119.2 °C and peak head temperature 176.6 →
+196.1 °C — an engine cooking its heads — while the largest residual response was
+ρ₁₀ at −9.7 σ, i.e. the OIL channel, which bearing wear and oil-pump wear
+already own. The twin would have called a cooling failure an oil failure.
+
+Two channels rather than one, because two is what ISOLATES rather than merely
+detects — the distinction PRAMANA exists to make:
+
+    blocked radiator   →  coolant UP   and head temperature UP
+    failing pump       →  coolant FLAT and head temperature UP
+
+Both are model-comparison residuals (measured vs twin), the same family as ρ₁₀,
+not parity relations between independent estimates. That is stated plainly here
+because the difference matters: ρ₁ and ρ₅ compare two estimators on one data
+stream; these compare one measurement against the healthy twin's prediction of
+it, and they carry information only because the twin integrates NOMINAL
+parameters while the plant runs the faulted ones.
+
+THE SIGMA FLOOR, 0.05 → 1e-3.
+-----------------------------
+The 0.05 floor dated from when ρ₁ and ρ₅ were structurally zero and their σ sat
+on the generator's 1e-3 floor. Those channels now carry real signal and their
+healthy σ is genuinely small (σ₁ = 0.0056 after Path 2 stopped sharing a sensor
+with Path 1), so the floor had become the divisor instead of σ — suppressing ρ₁
+by a factor of nine. Measured: a 120 hPa MAP-sensor bias produces a raw ρ₁ of
++0.093, which is a 9 % flow disagreement and should read ≈ 17 σ; through the
+floor it read 1.9 σ. The floor now matches sigma_generator's own 1e-3, so a
+z-score is a z-score.
 """
 
 import math
@@ -47,6 +85,7 @@ def compute_residuals(
     """
     N_cyl  = cfg["geometry"]["cylinders"]
     AFR_st = cfg["fuel"]["AFR_stoich"]
+    N_RESIDUALS = 13
 
     # ── ρ₁ — speed-density vs compressor map ─────────────────────────────
     # A GENUINE parity relation: two independent estimates of one quantity,
@@ -193,6 +232,23 @@ def compute_residuals(
     # Zero for a balanced engine; rises with single-cylinder defects.
     rho11 = (measured["ripple"] - 0.004) / 0.0125
 
+    # ── ρ₁₂ — coolant closure ────────────────────────────────────────────
+    # Measured coolant temperature against the healthy twin's prediction of it.
+    # None on a profile with no coolant loop (the air-cooled Rotax), handled the
+    # same way ρ₃ is: a channel with no sensor reports nothing rather than a
+    # fabricated zero. Raw units are degC; σ normalisation follows below.
+    if measured.get("coolant_temp_C") is None or predicted.get("coolant_temp_C") is None:
+        rho12 = None
+    else:
+        rho12 = measured["coolant_temp_C"] - predicted["coolant_temp_C"]
+
+    # ── ρ₁₃ — head-temperature closure ───────────────────────────────────
+    # The cross-cylinder MEAN against the twin's prediction — deliberately the
+    # component ρ₆–ρ₉ throw away. Together with ρ₁₂ it separates a blocked
+    # radiator (both rise) from a failing coolant pump (only this one rises).
+    cht_mean_pred = sum(predicted["cht_C"]) / N_cyl
+    rho13 = cht_mean - cht_mean_pred
+
     # ── Assemble ──────────────────────────────────────────────────────────
     raw_rho: list = [
         float(rho1),
@@ -203,6 +259,8 @@ def compute_residuals(
         *[float(x) for x in rho6_9],
         float(rho10),
         float(rho11),
+        None if rho12 is None else float(rho12),
+        float(rho13),
     ]
 
     # A profile may carry a FIXED healthy baseline measured during its own
@@ -214,22 +272,28 @@ def compute_residuals(
     # (including VRDE) retain the raw residual unchanged.
     baseline = cfg.get("parity_calibration", {}).get("baseline_rho")
     if baseline is not None:
-        if len(baseline) != len(raw_rho):
-            raise ValueError("parity_calibration.baseline_rho must contain 11 elements")
+        if len(baseline) > len(raw_rho):
+            raise ValueError(
+                f"parity_calibration.baseline_rho has {len(baseline)} entries but "
+                f"the residual vector has {len(raw_rho)}"
+            )
+        # A baseline commissioned BEFORE a residual was added covers only the
+        # channels that existed at commissioning time. Those are corrected; the
+        # later ones are left uncorrected, which is visible (they carry their
+        # healthy offset) rather than silently zero-filled — and re-commissioning
+        # the profile is the fix, not padding the artefact with invented numbers.
         for i, reference in enumerate(baseline):
             if raw_rho[i] is not None and reference is not None:
                 raw_rho[i] = float(raw_rho[i] - float(reference))
 
     # ── Sigma normalisation ───────────────────────────────────────────────
-    # Divides each element by its healthy σ to produce a Z-score.
-    # Floor of 0.05 prevents structurally near-zero channels (ρ₁, ρ₅) from
-    # amplifying tiny healthy-noise differences into enormous Z-scores.
-    # These channels carry real fault signal; the floor only guards the
-    # healthy regime, not the fault regime.
+    # Divides each element by its healthy σ to produce a Z-score. The floor is
+    # 1e-3, matching parity/sigma_generator.py's own floor on σ itself — see the
+    # module docstring for why it was 0.05 and why that suppressed real signal.
     if sigma_vec is not None:
         for i in range(len(raw_rho)):
             if raw_rho[i] is not None and i < len(sigma_vec):
-                denom = max(float(sigma_vec[i]), 0.05)
+                denom = max(float(sigma_vec[i]), 1e-3)
                 raw_rho[i] = float(raw_rho[i] / denom)
 
     return raw_rho

@@ -97,6 +97,13 @@ export interface ResidualVector {
   rho6_9_cyl_dev: PerCylinder;       // per-cylinder thermal deviation
   rho10_oil: number;
   rho11_ripple: number;              // 0.5-order magnitude
+  /** Coolant closure: measured coolant temperature vs the twin's prediction.
+   *  Null on a profile with no coolant loop (the air-cooled Rotax). */
+  rho12_coolant: number | null;
+  /** Head-temperature closure: cross-cylinder MEAN vs the twin's prediction —
+   *  deliberately the component rho6-9 discard, since a cooling fault heats all
+   *  four cylinders equally and cancels out of them. */
+  rho13_head_temp: number;
 }
 
 export interface Estimate {
@@ -154,7 +161,8 @@ export type FaultId =
   | 'map_sensor_drift'
   | 'egt_sensor_drift'
   | 'cht_sensor_drift'
-  | 'lambda_sensor_drift';
+  | 'lambda_sensor_drift'
+  | 'coolant_pump_degradation';
 
 export interface FaultHypothesis {
   fault: FaultId;
@@ -290,9 +298,11 @@ export const RESIDUAL_ROWS: ResidualMeta[] = [
   { key: 'rho9', label: 'ρ₉  cyl 4 thermal deviation', detail: 'vs conditional mean across cylinders' },
   { key: 'rho10', label: 'ρ₁₀ oil pressure model', detail: 'vs speed- and temperature-dependent model' },
   { key: 'rho11', label: 'ρ₁₁ 0.5-order crank ripple', detail: 'zero for a balanced engine' },
+  { key: 'rho12', label: 'ρ₁₂ coolant closure', detail: 'measured coolant vs twin prediction' },
+  { key: 'rho13', label: 'ρ₁₃ head-temperature closure', detail: 'cross-cylinder MEAN vs twin — what ρ₆–ρ₉ discard' },
 ];
 
-/** Flatten the residual vector to the 11-row display order. */
+/** Flatten the residual vector to the 13-row display order. */
 export function residualRow(rho: ResidualVector): (number | null)[] {
   return [
     rho.rho1_sd_vs_comp,
@@ -306,6 +316,8 @@ export function residualRow(rho: ResidualVector): (number | null)[] {
     rho.rho6_9_cyl_dev[3],
     rho.rho10_oil,
     rho.rho11_ripple,
+    rho.rho12_coolant,
+    rho.rho13_head_temp,
   ];
 }
 
@@ -317,7 +329,8 @@ export const FAULT_LABELS: Record<FaultId, string> = {
   ring_wear: 'Piston ring wear / blow-by',
   oil_pump_wear: 'Oil leak / pump wear',
   turbo_degradation: 'Turbocharger degradation',
-  cooling_fouling: 'Cooling / intercooler fouling',
+  cooling_fouling: 'Radiator fouling / blocked core',
+  coolant_pump_degradation: 'Coolant pump degradation',
   detonation: 'Detonation / pre-ignition',
   fuel_filter_clog: 'Fuel filter clog / vapour lock',
   bearing_wear: 'Bearing wear',

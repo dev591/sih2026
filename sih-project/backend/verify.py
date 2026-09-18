@@ -98,7 +98,7 @@ def test_op_invariance_and_sum_to_zero(cfg):
 
             measured  = meas_p.measure(plant.get_outputs(), add_noise=True)
             predicted = meas_t.measure(twin.get_outputs(),  add_noise=False)
-            rho = compute_residuals(measured, predicted, cfg, sigma_vec=[1.0] * 11)
+            rho = compute_residuals(measured, predicted, cfg, sigma_vec=[1.0] * 13)
 
             rho6_9  = [r for r in rho[5:9] if r is not None]
             sum_dev = sum(rho6_9)

@@ -3,7 +3,7 @@
  *
  * See docs/spec/novelty-detection.md for the full argument. In short:
  *
- *   Each known fault defines a DIRECTION in the 11-dimensional residual space.
+ *   Each known fault defines a DIRECTION in the 13-dimensional residual space.
  *   Stack them into F. Split the live residual into the part F can account for
  *   and the part it cannot:
  *
@@ -29,7 +29,7 @@
 import { INCIDENCE, FAULT_ORDER } from './incidence';
 import type { ResidualVector } from '../types/telemetry';
 
-export const N_RESIDUALS = 11;
+export const N_RESIDUALS = 13;
 
 /** Relative tolerance for calling a direction linearly independent. */
 const RANK_TOL = 0.05;
@@ -41,7 +41,7 @@ export interface NoveltyResult {
   unexplainedNorm: number;
   /** rank(F) at RANK_TOL — how many genuinely independent fault directions. */
   effectiveRank: number;
-  /** 11 - effectiveRank. If this is 0 the whole claim collapses; check it. */
+  /** 13 - effectiveRank. If this is 0 the whole claim collapses; check it. */
   nullSpaceDim: number;
   /** Per-residual unexplained component, for the explain drawer. */
   unexplained: number[];
@@ -145,7 +145,7 @@ export const NULL_SPACE_DIM = N_RESIDUALS - EFFECTIVE_RANK;
 /**
  * Split a residual vector into explained and unexplained parts.
  *
- * `rho` must be in the 11-element display order of residual-spec.md. Any null
+ * `rho` must be in the 13-element display order of residual-spec.md. Any null
  * entry (an unavailable parity path — e.g. rho3 on an unthrottled engine) is
  * treated as zero, which is correct: an unavailable channel carries no
  * evidence either way, and must not be allowed to masquerade as novelty.
@@ -183,6 +183,7 @@ export function noveltyFromVector(r: ResidualVector): NoveltyResult {
     r.rho4_energy, r.rho5_power,
     r.rho6_9_cyl_dev[0], r.rho6_9_cyl_dev[1], r.rho6_9_cyl_dev[2], r.rho6_9_cyl_dev[3],
     r.rho10_oil, r.rho11_ripple,
+    r.rho12_coolant, r.rho13_head_temp,
   ]);
 }
 

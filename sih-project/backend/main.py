@@ -68,7 +68,7 @@ try:
     with open(sigma_path) as f:
         sigma_vec: list[float] = json.load(f)
 except FileNotFoundError:
-    sigma_vec = [1.0] * 11
+    sigma_vec = [1.0] * 13
 
 # Pull engine limits for limits_state computation
 _CHT_LIMIT   = cfg["limits"]["cht_C"]
@@ -642,6 +642,10 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                         "rho6_9_cyl_dev":    rho[5:9],
                         "rho10_oil":         rho[9],
                         "rho11_ripple":      rho[10],
+                        # Thermal closures — see parity/residuals.py. rho12 is
+                        # null on a profile with no coolant loop.
+                        "rho12_coolant":     rho[11],
+                        "rho13_head_temp":   rho[12],
                     },
 
                     # ── UKF health parameters ─────────────────────────────

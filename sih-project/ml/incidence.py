@@ -1,7 +1,7 @@
 """
 Fault incidence matrix — Python mirror of frontend/src/analysis/incidence.ts.
 
-Column order: rho1 rho2 rho3 rho4 rho5 rho6 rho7 rho8 rho9 rho10 rho11
+Column order: rho1 rho2 rho3 rho4 rho5 rho6 rho7 rho8 rho9 rho10 rho11 rho12 rho13
 Encoding:
     2  = strong positive excitation
     1  = weak positive
@@ -15,21 +15,46 @@ Component faults above the line; instrumentation faults below.
 
 import numpy as np
 
-N_RESIDUALS = 11
+N_RESIDUALS = 13
 CYL_SLOTS = [5, 6, 7, 8]          # rho6..rho9 indices (0-based)
 N_CYL = len(CYL_SLOTS)            # 4 cylinders
 
+# ρ₁₂ (coolant closure) and ρ₁₃ (head-temperature closure), added 2026-09-16.
+#
+# THESE TWO COLUMNS WERE MEASURED, NOT ASSERTED. Each fault was perturbed
+# through the real MVEM at sea-level take-off (100 % throttle, 40 m/s — where
+# the thermostat is near wide open and a cooling fault is actually observable;
+# at cruise the valve absorbs it), at the upper severity rate of its range, and
+# the resulting Δρ read in σ units of the current sigma_vector. Glyph mapping:
+# |Δ| < 1 σ → 0, 1–3 σ → ±1, > 3 σ → ±2.
+#
+# Seven rows differed from the first-pass guesses and were corrected to what the
+# physics does: injector fouling, fuel-filter clog and misfire all pull ρ₁₃
+# NEGATIVE (a starved cylinder drags the cross-cylinder mean down), detonation
+# is strong rather than weak on ρ₁₃, bearing and ring wear are weak, and coolant
+# pump degradation nudges ρ₁₂ slightly negative — less heat reaches the coolant.
+#
+# Measured effect on the three classes that were previously unlearnable:
+#   radiator fouling  0.95 σ -> 7.5 σ      pump 0.57 σ -> 45.7 σ
+#   map sensor drift  1.45 σ -> 9.1 σ      (that one from the sigma-floor fix)
 # fmt: off
 INCIDENCE: dict[str, list[int]] = {
-    #                      ρ1  ρ2  ρ3  ρ4  ρ5  ρ6  ρ7  ρ8  ρ9 ρ10 ρ11
-    "ring_wear":           [ 1,  1,  1,  1,  1,  0,  0,  0,  0, -1,  0],
-    "turbo_degradation":   [-2,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0],
-    "injector_fouling":    [ 0, -2,  0,  1,  0,  2,  2,  2,  2,  0,  2],
-    "fuel_filter_clog":    [ 0, -2,  0,  1, -1,  0,  0,  0,  0,  0,  0],
-    "ignition_misfire":    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
-    "cooling_fouling":     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
-    "oil_pump_wear":       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
-    "bearing_wear":        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],
+    #                      ρ1  ρ2  ρ3  ρ4  ρ5  ρ6  ρ7  ρ8  ρ9 ρ10 ρ11 ρ12 ρ13
+    "ring_wear":           [ 1,  1,  1,  1,  1,  0,  0,  0,  0, -1,  0,  0, -1],
+    "turbo_degradation":   [-2,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+    "injector_fouling":    [ 0, -2,  0,  1,  0,  2,  2,  2,  2,  0,  2, -1, -2],
+    "fuel_filter_clog":    [ 0, -2,  0,  1, -1,  0,  0,  0,  0,  0,  0, -1, -2],
+    "ignition_misfire":    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2, -1, -2],
+    # A blocked radiator drives BOTH thermal closures up; that pair is what
+    # separates it from the pump below, and from the oil faults it used to be
+    # confused with.
+    "cooling_fouling":     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0,  2,  2],
+    # NEW FAULT. Degraded coolant pump: head-to-coolant conductance falls, so
+    # the heads run hot while the coolant loop itself stays in its band —
+    # measured, CHT +59 degC for a coolant change of ~0.
+    "coolant_pump_degradation": [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 2],
+    "oil_pump_wear":       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0,  0,  0],
+    "bearing_wear":        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0,  0,  1],
     # rho11 (+2) is what separates detonation from egt_sensor_drift. Without it
     # the two rows were IDENTICAL and the pair was structurally inseparable —
     # which mattered because one is a component fault and the other
@@ -37,12 +62,15 @@ INCIDENCE: dict[str, list[int]] = {
     # Detonation is a combustion abnormality that rings the structure and
     # shows in the 0.5-order crank ripple; a drifting thermocouple does not
     # move ripple at all. Measured effect on the oracle ceiling: 0.643 -> 0.687.
-    "detonation":          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  2],
+    "detonation":          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  2,  0,  2],
     # --- instrumentation faults ---
-    "map_sensor_drift":    [ 2,  1,  1,  1,  0,  0,  0,  0,  0,  0,  0],
-    "egt_sensor_drift":    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
-    "cht_sensor_drift":    [ 0,  0,  0,  0,  0,  2,  2,  2,  2,  0,  0],
-    "lambda_sensor_drift": [ 0,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+    "map_sensor_drift":    [ 2,  1,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+    "egt_sensor_drift":    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0,  0,  0],
+    # A drifting CHT probe biases the MEAN as well as the deviations, so it
+    # lifts rho13 — but leaves the coolant loop untouched, which is exactly how
+    # it separates from a real cooling fault.
+    "cht_sensor_drift":    [ 0,  0,  0,  0,  0,  2,  2,  2,  2,  0,  0,  0,  2],
+    "lambda_sensor_drift": [ 0,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
 }
 # fmt: on
 

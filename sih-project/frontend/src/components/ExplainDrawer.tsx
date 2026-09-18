@@ -8,30 +8,11 @@
  */
 
 import { useCurrentTick, useMission } from '../state/missionStore';
-import { FAULT_LABELS, RESIDUAL_ROWS, residualRow, type FaultId } from '../types/telemetry';
-
-/** The fault incidence matrix, as shipped in docs/spec/residual-spec.md.
- *  Component faults above the rule, instrumentation faults below it.
- *  2 = strong excitation, 1 = weak, -1/-2 = negative, 0 = unexcited. */
-const INCIDENCE: Partial<Record<FaultId, number[]>> = {
-  //                    ρ1  ρ2  ρ3  ρ4  ρ5  ρ6  ρ7  ρ8  ρ9 ρ10 ρ11
-  ring_wear:           [ 1,  1,  1,  1,  1,  0,  0,  0,  0, -1,  0],
-  turbo_degradation:   [-2,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0],
-  injector_fouling:    [ 0, -2,  0,  1,  0,  2,  2,  2,  2,  0,  2],
-  fuel_filter_clog:    [ 0, -2,  0,  1, -1,  0,  0,  0,  0,  0,  0],
-  ignition_misfire:    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
-  cooling_fouling:     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
-  oil_pump_wear:       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
-  bearing_wear:        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],
-  detonation:          [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
-  map_sensor_drift:    [ 2,  1,  1,  1,  0,  0,  0,  0,  0,  0,  0],
-  egt_sensor_drift:    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
-  cht_sensor_drift:    [ 0,  0,  0,  0,  0,  2,  2,  2,  2,  0,  0],
-  lambda_sensor_drift: [ 0,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-};
-
-const SIGN = (v: number) =>
-  v === 2 ? '⇑' : v === 1 ? '↑' : v === -1 ? '↓' : v === -2 ? '⇓' : '·';
+import { FAULT_LABELS, RESIDUAL_ROWS, residualRow } from '../types/telemetry';
+// The incidence matrix is imported, NOT copied. This file used to keep its own
+// duplicate, and two copies that must agree is exactly how the detonation /
+// egt_sensor_drift rows drifted apart once already.
+import { INCIDENCE, SIGN } from '../analysis/incidence';
 
 export function ExplainDrawer() {
   const open = useMission((s) => s.explainOpen);
@@ -45,7 +26,7 @@ export function ExplainDrawer() {
   const { diagnosis, rho } = tick.health;
   const top = diagnosis.top[0];
   const values = residualRow(rho);
-  const signature = INCIDENCE[top.fault] ?? new Array(11).fill(0);
+  const signature = INCIDENCE[top.fault] ?? new Array(RESIDUAL_ROWS.length).fill(0);
 
   // Which residuals are actually carrying the diagnosis right now.
   const ranked = values
