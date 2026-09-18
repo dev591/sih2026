@@ -202,3 +202,24 @@ leaving coolant essentially unchanged.
 
 Suites: `test_sensors.py` 12/12, `verify.py` 6/6 (new cooling test),
 `gates_check.py` 6/6, sigma regenerated.
+
+## Known issues (open) — 2026-09-19
+
+Bounded limitations we know about and have chosen not to fix yet. Each one is
+measured, not suspected.
+
+- **Healthy "confidence" is an alarm margin, not a probability.** On the ML path
+  the healthy hypothesis reports `p = 1 − score / threshold`. A healthy engine
+  sits at ~40 % of the alarm threshold, so it reads ~60 % for the whole flight
+  (900 s run: 834 frames, 0 false alarms, score peak 50 % of threshold, no
+  drift after the first ~40 s while the residual window fills). The panel now
+  labels it *alarm margin remaining* and derives it from score and threshold, so
+  it means the same on the physics-only fallback path (which hardcodes 0.98).
+  A real rescale needs the healthy-data score distribution; deferred until the
+  demo-critical work is locked.
+- **`ml/weights/*` are 11-residual; the 13-residual refactor (branch
+  `refactor/13-residual`) needs a retrain before it can merge.** Until then a
+  weights/model mismatch degrades to physics-only frames instead of killing the
+  websocket (`b83181d`).
+- **No simulator-generated training set exists yet** (`data/sim_v1/` has not been
+  generated). Every shipped weight was fitted to `ml/data/synthetic.py`.
