@@ -92,6 +92,7 @@ def main() -> None:
         n_rows = 0
         n_bad_label = 0
         n_nan_resid = 0
+        n_rho3_populated = 0
         n_nan_op = 0
         n_rul_bad = 0
         counts: dict[int, int] = {}
@@ -117,8 +118,12 @@ def main() -> None:
                   ((chunk["fault_active"] == 1) & (chunk["label_class_idx"] == 0))
             n_bad_label += int(bad.sum())
 
-            r = chunk[RESIDUAL_N].to_numpy(dtype=float)
+            # rho3 is structurally absent (no Path 4 on an unthrottled engine, so
+            # residuals.py returns None). It must be empty on EVERY row; anything
+            # else means the generator or the residual code changed under us.
+            r = chunk[[c for c in RESIDUAL_N if c != "rho3_n"]].to_numpy(dtype=float)
             n_nan_resid += int((~np.isfinite(r)).sum())
+            n_rho3_populated += int(np.isfinite(chunk["rho3_n"].to_numpy(dtype=float)).sum())
             o = chunk[OP_COLUMNS].to_numpy(dtype=float)
             n_nan_op += int((~np.isfinite(o)).sum())
 
@@ -140,6 +145,8 @@ def main() -> None:
             fail(f"{n_bad_label} rows where label_class_idx disagrees with fault_active")
         else:
             ok("label_class_idx consistent with fault_active on every row")
+        if n_rho3_populated:
+            fail(f"rho3 is populated on {n_rho3_populated} rows but is documented as always empty")
         if n_nan_resid:
             fail(f"{n_nan_resid} non-finite values in normalised residuals")
         else:
