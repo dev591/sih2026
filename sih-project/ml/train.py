@@ -276,6 +276,12 @@ def main() -> None:
     print("NOT from BE-1's MVEM — models train on all 11 dims regardless of rho1/rho5 floor issue.")
     print()
 
+    # TODO(retrain on data/sim_v1): when this switches from the synthetic
+    # dataset to the simulator CSVs, the loader MUST zero-fill NaN residuals
+    # (rho3_n is NaN on every row by design) exactly as ml/inference.py does
+    # (`np.where(np.isnan(rho), 0.0, rho)`). Otherwise the model trains on NaN or
+    # a different constant than it is served -> train/serve skew that shows up
+    # only as a model that quietly underperforms. Train on the *_n columns.
     dataset = SyntheticResidualDataset(
         n_healthy=800, n_healthy_val=200,
         n_fault_per_class=300,
