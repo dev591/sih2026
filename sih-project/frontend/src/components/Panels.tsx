@@ -159,6 +159,10 @@ export function DiagnosisPanel() {
   const top = diagnosis.top[0];
   const healthy = top.fault === 'healthy';
   const flag = healthy ? 'ok' : diagnosis.is_sensor_fault ? 'sensor' : 'alert';
+  // The healthy row's probability is not a confidence: the ML path reports
+  // 1 − score/threshold, the physics-only fallback a fixed 0.98. Derive the
+  // margin here so it means the same thing on both paths.
+  const alarmMargin = Math.min(1, Math.max(0, 1 - anomaly.score / anomaly.threshold));
 
   return (
     <Panel
@@ -171,7 +175,14 @@ export function DiagnosisPanel() {
           {FAULT_LABELS[top.fault]}
           {top.cylinder != null && <span className="diag-cyl">cyl {top.cylinder + 1}</span>}
         </div>
-        <div className="diag-conf">{(top.p * 100).toFixed(0)}%</div>
+        {healthy ? (
+          <div className="diag-conf" title="1 − anomaly score / threshold. A healthy engine sits well inside the alarm threshold, not at 100%.">
+            {(alarmMargin * 100).toFixed(0)}%
+            <span className="diag-conf-label">alarm margin remaining</span>
+          </div>
+        ) : (
+          <div className="diag-conf">{(top.p * 100).toFixed(0)}%</div>
+        )}
       </div>
 
       {diagnosis.is_sensor_fault && (
@@ -207,7 +218,9 @@ export function DiagnosisPanel() {
               {h.cylinder != null && ` · cyl ${h.cylinder + 1}`}
             </span>
             <span className="hyp-src">{h.source}</span>
-            <span className="hyp-p">{(h.p * 100).toFixed(0)}%</span>
+            <span className="hyp-p">
+              {(((h.fault === 'healthy' ? alarmMargin : h.p)) * 100).toFixed(0)}%
+            </span>
           </div>
         ))}
       </div>
@@ -220,7 +233,7 @@ export function DiagnosisPanel() {
         />
         <Metric label="Threshold" value={anomaly.threshold.toFixed(3)} tone="dim" />
         <Metric
-          label="Persistence"
+          label="Windows over threshold"
           value={`${anomaly.persistence.n}/${anomaly.persistence.of}`}
           tone={anomaly.persistence.met ? 'warn' : 'dim'}
         />

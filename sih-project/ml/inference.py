@@ -270,7 +270,7 @@ class InferencePipeline:
             "anomaly":   {
                 "score":       round(ae_err, 4),
                 "threshold":   round(self.anomaly_threshold, 4),
-                "persistence": {"n": self.persistence.n,
+                "persistence": {"n": self.persistence.hits,
                                 "of": self.persistence.m,
                                 "met": alarm},
             },

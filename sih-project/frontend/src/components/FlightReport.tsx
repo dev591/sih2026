@@ -180,7 +180,7 @@ export function FlightReport() {
                   <td>{fmt(anomaly.score, 2)} (threshold {fmt(anomaly.threshold, 2)})</td>
                 </tr>
                 <tr>
-                  <th>Persistence</th>
+                  <th>Windows over threshold</th>
                   <td>{anomaly.persistence.n} of {anomaly.persistence.of}</td>
                 </tr>
               </tbody>

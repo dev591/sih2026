@@ -152,6 +152,11 @@ class PersistenceRule:
         self.m = m
         self._history: list[bool] = []
 
+    @property
+    def hits(self) -> int:
+        """Windows over threshold among the last M seen — the live count."""
+        return sum(self._history)
+
     def update(self, exceeded: bool) -> bool:
         self._history.append(exceeded)
         if len(self._history) > self.m:
