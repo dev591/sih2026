@@ -557,24 +557,61 @@ body {
 /* Expert view reserves the panel's height; the slot is what holds it open now
    that the canvas is not in the flow. */
 .panel-body-3d .engine-slot { min-height: 432px; }
+/* The canvas is a dark studio whatever the page theme, so its furniture uses
+   its own light-on-dark ink rather than the page tokens. */
+.engine3d { --s-ink: #c9d3df; --s-dim: #8793a3; --s-line: rgb(255 255 255 / 0.14); --s-glass: rgb(14 18 25 / 0.72); }
+.engine3d canvas { cursor: grab; }
+.engine3d canvas:active { cursor: grabbing; }
+.engine3d-pointer canvas { cursor: pointer; }
+
 .engine3d-hint {
-  position: absolute; bottom: 9px; left: 13px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
-  color: var(--text-dimr); pointer-events: none;
+  position: absolute; bottom: 10px; left: 14px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--s-dim); pointer-events: none;
 }
 
-/* Recovery from a judge's orbit. Same corner idiom as the hint rather than a
-   new visual language — it should read as part of the viewport furniture, not
-   as a control competing with the panels. */
-.engine3d-reset {
-  position: absolute; bottom: 7px; right: 13px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
-  color: var(--text-dimr); background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--line); border-radius: 2px;
-  padding: 3px 8px; cursor: pointer;
-  transition: color .12s, border-color .12s;
+/* View switch: one segmented control, top-left, out of the engine's way. */
+.engine3d-tools {
+  position: absolute; top: 12px; left: 14px;
+  display: flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--s-glass); backdrop-filter: blur(8px);
+  border: 1px solid var(--s-line); border-radius: 6px;
 }
-.engine3d-reset:hover { color: var(--accent); border-color: var(--accent); }
+.engine3d-tools button {
+  font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 0.01em;
+  color: var(--s-dim); background: transparent; border: 0; border-radius: 4px;
+  padding: 5px 11px; cursor: pointer; transition: color .15s, background .15s;
+}
+.engine3d-tools button:hover { color: var(--s-ink); }
+.engine3d-tools button.on { color: #0b0e13; background: #e6edf5; }
+.engine3d-tools-sep { width: 1px; height: 16px; background: var(--s-line); margin: 0 4px; }
+
+/* What the colours mean, stated once, on the canvas where the colours are. */
+.engine3d-legend {
+  position: absolute; top: 14px; right: 16px;
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--sans); font-size: 11.5px; color: var(--s-ink); pointer-events: none;
+}
+.engine3d-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.engine3d-legend .dot-fault { background: #ff7a1a; box-shadow: 0 0 8px #ff7a1a; }
+.engine3d-legend .dot-sensor { background: #22d3ee; box-shadow: 0 0 8px #22d3ee; }
+.engine3d-legend-arch { color: var(--s-dim); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; padding-left: 14px; border-left: 1px solid var(--s-line); }
+@media (max-width: 1100px) { .engine3d-legend-arch { display: none; } }
+
+/* Per-cylinder tag: number + live CHT. */
+.cyl-tag {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11.5px;
+  color: #dfe6ee; background: rgb(12 16 22 / 0.78); backdrop-filter: blur(6px);
+  border: 1px solid rgb(255 255 255 / 0.16); border-radius: 5px;
+  padding: 2px 6px 2px 3px; white-space: nowrap; pointer-events: none;
+  transition: border-color .3s, color .3s, box-shadow .3s;
+}
+.cyl-tag-n {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 3px;
+  background: rgb(255 255 255 / 0.1); font-weight: 600; font-size: 11px;
+}
+.cyl-tag-on { background: rgb(20 14 8 / 0.9); box-shadow: 0 0 0 3px rgb(255 122 26 / 0.18), 0 0 18px rgb(255 122 26 / 0.35); font-weight: 600; }
 
 /* ---------------- data source badge ---------------- */
 .brand-right { display: flex; align-items: center; gap: 10px; }
@@ -813,7 +850,8 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-2);
+  /* matches SCENE.bg: the canvas stops short of the verdict lane */
+  background: #0b0e13;
   border-top: 1px solid var(--line);
 }
 /* The engine no longer lives in the stage — a slot marks where it goes and the

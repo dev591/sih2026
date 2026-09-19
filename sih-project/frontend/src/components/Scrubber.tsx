@@ -196,6 +196,16 @@ export function BeatBar() {
     return () => window.removeEventListener('keydown', onKey);
   }, [jumpTo]);
 
+  // ?beat=N opens straight at a scripted beat, for rehearsal and for
+  // capturing a specific moment without clicking through the mission.
+  useEffect(() => {
+    const n = Number(new URLSearchParams(window.location.search).get('beat'));
+    if (Number.isInteger(n) && n >= 1 && n <= SCRIPT_BEATS.length) {
+      const id = setTimeout(() => jumpTo(SCRIPT_BEATS[n - 1].t), 400);
+      return () => clearTimeout(id);
+    }
+  }, [jumpTo]);
+
   // The beats describe the rehearsed mission. In the sandbox they refer to
   // events that are not in the timeline, so showing them would be a lie.
   if (!onScript) {

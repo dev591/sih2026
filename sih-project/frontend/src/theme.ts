@@ -62,11 +62,14 @@ export const C = {
  * the values that had to change most when the ground went from black to white.
  */
 export const SCENE = {
-  /** Backdrop and fog. Slightly darker than `--panel` so the white engine
-   *  highlights still have somewhere to go. */
-  bg: '#eef2f7',
-  fogNear: 14,
-  fogFar: 30,
+  /** Dark studio. A lit metal engine reads as hardware against near-black and
+   *  as a grey silhouette against white; glow (faults, hot exhaust,
+   *  combustion) only carries on a dark ground. Graphite rather than black so
+   *  a washed-out projector still shows the floor. Fog only fades the far
+   *  floor: the camera sits ~16 units out, so it must start beyond that. */
+  bg: '#0b0e13',
+  fogNear: 24,
+  fogFar: 52,
   grid: '#dfe6ee',
   gridSub: '#e9eef4',
 
@@ -90,8 +93,8 @@ export const SCENE = {
    * cylinder's emissiveIntensity past it (see FAULT_EMISSIVE), so once again the
    * fault is the only thing in frame that blooms.
    */
-  bloomThreshold: 1.02,
-  bloomIntensity: 0.45,
+  bloomThreshold: 1.05,
+  bloomIntensity: 0.7,
   /** Peak emissive on a fully-anomalous cylinder. Must exceed bloomThreshold. */
   faultEmissive: 2.6,
 
