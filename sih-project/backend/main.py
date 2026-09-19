@@ -146,14 +146,18 @@ def _tas_mps(t: float, conn: dict | None = None) -> float:
 def _altitude_ft(t: float, conn: dict | None = None) -> float:
     """
     Commanded altitude if the GCS has asked for one, otherwise the scenario's
-    own profile: climb from 5 000 ft to 18 000 ft over 8 minutes, then cruise.
+    own profile: climb from 5 000 ft to 11 000 ft over 8 minutes, then cruise.
+
+    11,000 ft (was 18,000 ft, 2026-09-19): DRDO's own published VRDE critical
+    altitude, replacing an unsourced demo point — see gates_check.py's
+    module docstring for the full reasoning.
     """
     cmd = (conn or {}).get("alt_cmd")
     if cmd:
         u = min(1.0, max(0.0, (t - cmd["startT"]) / ALT_RAMP_S))
         return cmd["from_ft"] + (cmd["to_ft"] - cmd["from_ft"]) * (u * u * (3.0 - 2.0 * u))
 
-    lo, hi, climb_s = 5000.0, 18000.0, _CLIMB_S
+    lo, hi, climb_s = 5000.0, 11000.0, _CLIMB_S
     if t <= 0.0:   return lo
     if t >= climb_s: return hi
     return lo + (hi - lo) * (t / climb_s)
@@ -423,7 +427,7 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     conn["alt_cmd"] = {
                         "startT": now,
                         "from_ft": _altitude_ft(now, conn),
-                        "to_ft":   float(msg.get("ft", 18000.0)),
+                        "to_ft":   float(msg.get("ft", 11000.0)),
                     }
                 elif msg.get("type") == "reset":
                     conn["fault_config"]  = {}

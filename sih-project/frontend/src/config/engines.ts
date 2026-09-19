@@ -164,11 +164,15 @@ export const VRDE_180: EngineProfile = {
     'Unthrottled FADEC aero-diesel — no metering restriction, so Path 4 does not exist. ' +
     '3 available paths give 2 independent air-path residuals; ρ₃ is null.',
 
-  cruiseAltitude_ft: 18000,
+  // Reference altitude moved 2026-09-19 from 18,000 ft (an unsourced demo
+  // point — see backend/gates_check.py's module docstring) to 11,000 ft,
+  // DRDO's own published VRDE critical altitude. Values below re-measured
+  // from backend verify.py at the new point, not hand-adjusted.
+  cruiseAltitude_ft: 11000,
   cruiseTas_mps: 61.2,
-  cruiseBladeAngle_deg: 26.2,   // backend verify.py, 18,000 ft / 72 % steady state
-  nominalGearboxOil_C: 99.4,    // same run
-  nominalCoolant_C: 87.4,       // backend, 18,000 ft / 72 %, thermostat ~49 % open
+  cruiseBladeAngle_deg: 25.1,   // backend verify.py, 11,000 ft / 72 % steady state
+  nominalGearboxOil_C: 95.8,    // same run
+  nominalCoolant_C: 86.4,       // backend, 11,000 ft / 72 %, thermostat ~43 % open
 };
 
 // ---------------------------------------------------------------------------

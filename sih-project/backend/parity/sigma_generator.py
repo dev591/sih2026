@@ -250,7 +250,9 @@ FAULT_SCENARIOS = [
 ]
 
 FAULT_RUN_DURATION_S = 300     # 5-minute runs, matching demo script length
-FAULT_ALTITUDE_FT    = 18000   # Demo cruise altitude
+FAULT_ALTITUDE_FT    = 11000   # Demo cruise altitude — DRDO's published VRDE
+                                # critical altitude (was 18000, an unsourced
+                                # demo point; see gates_check.py docstring)
 FAULT_THROTTLE_PCT   = 72      # Demo cruise throttle
 
 

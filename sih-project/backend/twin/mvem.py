@@ -258,6 +258,8 @@ class MVEM:
         self.brake_power_kW = 0.0
         self.eta_c_last = self.eta_c_max
         self.pi_t_last = 1.0
+        self.mdot_ex_last = 0.0
+        self.bypass_frac_last = 0.0
         self.oil_press_bar_val = 3.4
 
     def prop_rpm_setpoint(self, throttle_frac: float) -> float:
@@ -579,6 +581,8 @@ class MVEM:
                 # is what stops P_turb collapsing to zero whenever the
                 # intake side is sub-atmospheric (§1.3).
                 mdot_ex_total = float(np.sum(m_ex_i)) * (1.0 - bypass_frac)
+                self.mdot_ex_last = mdot_ex_total
+                self.bypass_frac_last = bypass_frac
                 Pi_t = 1.0 + self._turb_pr_gain * (mdot_ex_total / self._mdot_ex_design) ** 2
                 # A real turbine chokes: flow through a fixed nozzle area
                 # saturates at high pressure ratio rather than growing
@@ -678,6 +682,8 @@ class MVEM:
             'cht_C': [float(x) for x in (self.T_cht - 273.15)],
             'brake_power_kW': float(self.brake_power_kW),
             'turbo_rpm': float(self.w_tc * 60 / (2 * np.pi)),
+            'mdot_ex_kgps': float(self.mdot_ex_last),
+            'wastegate_bypass_frac': float(self.bypass_frac_last),
             'oil_press_bar': float(self.oil_press_bar_val),
             'oil_temp_C': float(self.T_oil - 273.15),
             'ripple': float(self.ripple),

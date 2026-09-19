@@ -223,3 +223,59 @@ measured, not suspected.
   websocket (`b83181d`).
 - **No simulator-generated training set exists yet** (`data/sim_v1/` has not been
   generated). Every shipped weight was fitted to `ml/data/synthetic.py`.
+
+## 2026-09-19 — Phase 3 and 4 reopened: root-cause altitude-reference fix
+
+Phase 3 (liquid cooling) and Phase 4 (turbine/FMEP) were both previously
+marked done. Both got new commits today. **This is not a new defect found in
+either phase** — it is one root cause surfacing in both places, and worth
+recording so nobody reopens the investigation from scratch later.
+
+Root cause: `impeller_diameter_m` (compressor) was 0.070 m, sized for the
+wrong reference machine — a 70mm wheel at the published 172,000 rpm
+containment speed gives a 630 m/s blade tip speed, well past the ~450–500 m/s
+ceiling a real aluminum compressor wheel is designed to. Replaced with the
+Garrett GT1749V's sourced 49mm exducer OD (a real turbo in VRDE's own
+power/displacement class), which independently corroborates the 172,000 rpm
+figure (GT1749V rated max: 175,000 rpm) while giving a physically sane 449
+m/s tip speed. `n_corr_design_rpm` was then derived analytically via N~1/D
+turbo similarity (118,000 rpm @ 70mm → 168,600 rpm @ 49mm), not fitted.
+
+That correctly-sized compressor then exposed that the project's own demo
+cruise reference point — 18,000 ft / 72% throttle — was never a sourced
+condition (it traced to a `main.py` hardcode, labeled "nominal demo cruise
+point" in the config). It demanded a compressor pressure ratio of ~2.7 at
+that altitude, past what any real single-stage automotive-class turbo in
+this size class delivers (~2.2–2.5 ceiling) at any altitude — the old 70mm
+wheel only "passed" because it had unrealistic excess PR headroom, not
+because 18,000 ft was an achievable cruise condition. Moved the reference to
+**11,000 ft/72%**, DRDO's own published VRDE critical altitude, which needs
+only PR≈2.04.
+
+Since Phase 3's radiator sizing and Phase 4's turbine `mdot_ex_design_kgps`
+were both calibrated *at* the old 18,000 ft point, they had to be
+recalibrated against real 11,000 ft physics (re-simulated, not
+search-and-replaced) once the reference moved:
+- `turbine.mdot_ex_design_kgps`: 0.032 → 0.0761 kg/s, via fixed-point
+  iteration against the actual measured exhaust flow at 11k/72%
+- Radiator sizing decision (`frontal_area_m2 = 0.086`) unchanged — its real
+  driver is the SL ISA+20 hot-day case, not cruise altitude — but its
+  reported comparison column was re-measured at 11k rather than relabeled;
+  the SL columns shifted too when re-measured (boost/intake-temp effects
+  reach the coolant loop even at sea level), margin improved to 10.7 K
+
+Compressor map shape (`psi_max_design`, `phi_max_design`) needed **no
+change** — a bounded joint fit against the corrected 11k target converged
+exactly at the pre-existing values, confirming the earlier provisional fit
+(which had pushed against its bounds trying to satisfy the unreachable
+18kft target) was chasing a bad target, not a bad map.
+
+Sigma vector regenerated, `verify.py` 6/6, `gates_check.py` 5/6 — Gate 2
+(turbo speed at cruise, target off any floor/ceiling) still fails, pinned
+exactly at the 172,000 rpm mechanical clamp even post-fix. Open question,
+not yet resolved: whether Gate 2's premise (a cruise-throttle turbo
+shouldn't sit at its mechanical limit) is even correct for an engine whose
+published spec is *sustained* near-full power all the way to its rated
+altitude — unlike a typical light aircraft that cruises well below its
+ceiling. `frontend/src/config/engines.ts`'s three altitude-derived display
+constants were re-measured at 11k and updated to match.

@@ -1,9 +1,22 @@
 """
 PRAMANA-DIRECTIVE-2026-09-10.md §1.7 — the six P0 acceptance gates.
 
-Runs the VRDE profile at 18,000 ft / 72% throttle to steady state and checks
+Runs the VRDE profile at 11,000 ft / 72% throttle to steady state and checks
 all six gates. Prints PASS/FAIL for each with the measured value, never just
 a checkmark. All six must pass before any ML retraining.
+
+Reference condition moved from 18,000 ft (2026-09-19; was an unsourced
+"main.py hardcode" demo point, never a published VRDE/comparable-engine
+cruise condition) to 11,000 ft — DRDO's own published VRDE critical altitude.
+Root cause: the old 18kft/72% point demanded PR = 1.368/0.506 = 2.7 from the
+compressor at that altitude, past what a real single-stage automotive-class
+turbo (this profile's sourced GT1749V, ~PR 2.2-2.5 ceiling) can deliver at
+any altitude — the old 70mm wheel only "passed" because it had far more
+pressure-ratio headroom than a real turbo this size would have. 11,000 ft/72%
+needs only PR ~= 1.368/0.670 = 2.04, comfortably inside real hardware's range,
+and doubles up DRDO's one sourced altitude for two gates: 100%-throttle tests
+the edge of the envelope (published critical altitude itself), 72%-throttle
+tests that cruise sits safely inside it.
 """
 import sys
 from pathlib import Path
@@ -18,7 +31,7 @@ from twin.atmosphere import isa
 from twin.measurement import MeasurementModel
 from parity.residuals import compute_residuals
 
-ALT_FT, THROTTLE = 18000.0, 72.0
+ALT_FT, THROTTLE = 11000.0, 72.0
 
 
 def cruise_rpm_target(cfg, throttle_pct):
@@ -112,10 +125,19 @@ def main():
     results = []
 
     g1 = 0.9 <= p_im_bar <= 1.4
-    results.append(("1", "MAP at 18kft/72%", f"{p_im_bar:.3f} bar", "[0.9, 1.4] bar", g1))
+    results.append(("1", "MAP at 11kft/72%", f"{p_im_bar:.3f} bar", "[0.9, 1.4] bar", g1))
 
-    g2 = 80_000 <= turbo_rpm <= 160_000
-    results.append(("2", "Turbo speed", f"{turbo_rpm:,.0f} rpm", "[80k, 160k] rpm, off any floor", g2))
+    # Band re-anchored 2026-09-19 off the new n_corr_design_rpm (168,600,
+    # derived from the 49mm GT1749V-sourced impeller via N~1/D turbo
+    # similarity — see config/engine_vrde_180.yaml compressor block), not
+    # re-guessed in isolation: old band (80k-160k) scaled by the same
+    # 168,600/118,000 factor that moved the design speed. Upper bound now
+    # exceeds max_shaft_rpm (172,000) so it is non-binding — the mechanical
+    # clamp itself is the real ceiling; this gate is really checking the
+    # floor (turbo not idling near-zero boost at cruise) plus "not pinned
+    # at the clamp", the latter checked directly against g2's own <172000.
+    g2 = 114_000 <= turbo_rpm < 172_000
+    results.append(("2", "Turbo speed", f"{turbo_rpm:,.0f} rpm", "[114k, 172k) rpm, off any floor or the mechanical clamp", g2))
 
     # POWER THRESHOLD, re-derived under the fuel-led diesel combustion model
     # (docs/plan Phase 4). Was >=60% rated, calibrated under the OLD
@@ -123,25 +145,20 @@ def main():
     # 0.98 at full power — a compression-ignition engine can never run there.
     #
     # A genuine diesel is fuel-led and smoke-limited: at THIS gate's own
-    # reference point (18,000 ft / 72% throttle — the config's own "nominal
-    # demo cruise point", identical for every gate), the smoke limiter
-    # (lambda >= 1.15, sourced — see engine_vrde_180.yaml's fuel block) now
-    # caps delivered fuel below what the throttle schedule commands, every
-    # single time it was checked across the sweep this was derived from
-    # (sea level through 18,000 ft, 72% and 100% throttle all land smoke-
-    # limited). That is correct physics, not a bug: leaner combustion makes
-    # less power per unit of air, and Gate 1's own [0.9, 1.4] bar band caps
-    # how much air is available at 72% throttle — so 72% throttle-LEVER
-    # position no longer corresponds to ~72% of rated power the way it did
-    # under the old, unrealistically rich schedule.
+    # reference point (11,000 ft / 72% throttle — DRDO's own published VRDE
+    # critical altitude, see the module docstring for why this replaced the
+    # unsourced 18,000 ft demo point), the smoke limiter (lambda >= 1.15,
+    # sourced — see engine_vrde_180.yaml's fuel block) may still cap
+    # delivered fuel below what the throttle schedule commands, the same
+    # physics as before at a different, correctly-sourced altitude.
     #
-    # Measured at this exact gate condition after the diesel rewrite: 74.9 kW
-    # = 55.8% rated, rpm 3440 (3.9% off target, inside the 5% band already).
-    # Consistent across the wider sweep this was checked against: 55.3-57.5%
-    # rated at every altitude/throttle combination tried (sea level to
-    # 18,000 ft, 72% throttle), all smoke-limited. 50% is a threshold BELOW
-    # every measured value with real margin, not tuned to the single number
-    # that happened to pass.
+    # NOTE: the specific power/rpm figures below were measured at the OLD
+    # 18,000 ft reference point and are stale pending re-measurement at
+    # 11,000 ft (tracked as part of the 2026-09-19 altitude-reference fix,
+    # see docs/VALIDATION-STATUS.md). The 50% threshold itself was set with
+    # real margin below every value measured across a wide sweep, not tuned
+    # to one number, so it is expected to still hold — but it has not yet
+    # been re-verified against the new reference point.
     rpm_target = cruise_rpm_target(cfg, THROTTLE)
     rpm_dev = abs(rpm - rpm_target) / rpm_target
     g3 = (power_frac >= 0.50) and (rpm_dev <= 0.05)

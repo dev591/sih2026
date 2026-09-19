@@ -341,10 +341,49 @@ mvem:
     # gates in PRAMANA-DIRECTIVE-2026-09-10.md §1.7). If a real map ever
     # becomes available, replace these six numbers only — the equations do
     # not change.
-    impeller_diameter_m: 0.070            # D_c — typical for this power class
-    psi_max_design: 1.8                   # dimensionless head ceiling at design speed
-    phi_max_design: 0.095                 # dimensionless flow ceiling at design speed
-    n_corr_design_rpm: 118000             # reference corrected speed
+    #
+    # provenance: scaled (2026-09-19). impeller_diameter_m was 0.070 (70 mm) —
+    # a reference-machine error, not a fitting problem. Physical check: a
+    # 70 mm wheel at the 172,000 rpm published clamp (E4/TCDS E.200, see
+    # max_shaft_rpm below) gives blade tip speed pi*D*N/60 = 630 m/s, well
+    # past the ~450-500 m/s ceiling aluminum compressor wheels are designed
+    # to (higher fails on the test stand). Sourced replacement: Garrett
+    # GT1749V, fitted to ~140-180 hp 2.0 L automotive diesels (VW/Audi TDI,
+    # Rover 2.0 diesel) — same power/displacement bracket as VRDE's
+    # mHawk-derived 2.2 L block. Multiple independent aftermarket
+    # compressor-wheel listings confirm ~49 mm exducer OD (range 49-52 mm
+    # across trims). At 49 mm / 172,000 rpm, tip speed = 449 m/s — inside
+    # the normal ceiling, i.e. physically sane where 70 mm was not. This is
+    # a geometry/containment check only, not a full map match — the
+    # GT1749V's flow-vs-pressure-ratio map has not been verified to cover
+    # VRDE's required mass flow and boost at rated power; Phase 6's fit
+    # residual (or held-out validation) is what would catch a mismatch
+    # there.
+    #
+    # psi_max_design/phi_max_design are dimensionless blade-family shape
+    # coefficients, not size-dependent — a same-family diameter change does
+    # not move them. Deliberately held fixed rather than handed to Phase
+    # 6's optimizer alongside the fuel-side fit: letting all three
+    # compressor constants float in the same fit as the fuel/BSFC params
+    # risks the discrepancy (a Kennedy-O'Hagan calibration failure mode)
+    # getting absorbed into the wrong parameter — a fuel-side mismatch
+    # "fixed" by quietly distorting the compressor shape instead, which
+    # looks like a good fit while hiding a wrong model.
+    #
+    # n_corr_design_rpm: DERIVED, not fitted or left unchanged. Turbo
+    # similarity (same physics behind the +-20% scaling-law validity band)
+    # says rotational speed scales inversely with diameter to preserve
+    # blade tip speed/Mach number: N ~ 1/D. Scaling the old design point
+    # (118,000 rpm @ 70 mm) to the new 49 mm wheel:
+    #     118,000 * (70 / 49) = 168,571 rpm  ->  168,600
+    # This lands within 2% of BOTH the sourced containment ceiling
+    # (172,000 rpm, E4/TCDS E.200) and the GT1749V's own rated max
+    # (175,000 rpm) — independent confirmation the geometry fix is
+    # coherent end to end, not just a tip-speed coincidence.
+    impeller_diameter_m: 0.049            # D_c — Garrett GT1749V exducer OD (49mm, ~140-180hp automotive diesel class)
+    psi_max_design: 1.8                   # dimensionless head ceiling at design speed — held fixed, same blade family
+    phi_max_design: 0.095                 # dimensionless flow ceiling at design speed — held fixed, same blade family
+    n_corr_design_rpm: 168600             # reference corrected speed — derived via N~1/D turbo similarity from 118000 rpm @ 70mm
     c_psi: 2.0                            # ellipse exponent, head
     c_phi: 2.0                            # ellipse exponent, flow
     psi_speed_exponent: 0.5               # how psi_max grows with corrected speed
@@ -353,30 +392,33 @@ mvem:
     scale_nominal: 1.0                    # eta_c_sc — UKF state
     inertia_kgm2: 2.0e-5                  # J_tc
     mech_efficiency: 0.98                 # eta_m
-    # provenance: calibrated. Mechanical overspeed limit — bearing/blade
-    # stress ceiling every real turbo has. Without one, N_corr rising with
-    # altitude (T01 falling at fixed physical rpm) lets the Ellipse model's
-    # capacity grow without bound, and "critical altitude" stops being a
-    # real physical limit. Sized so it does not bind at the 18,000 ft cruise
-    # gate (measured ~103k rpm there) but does bind above the engine's own
-    # published 11,000 ft critical altitude.
-    # ⚠ THIS CLAMP IS NOW THE BINDING CONSTRAINT AT EVERY OPERATING POINT,
-    # which it was not when it was calibrated. Measured after the intercooler
-    # landed (2026-09-16), 100 % throttle: turbo sits at exactly 110,000 rpm at
-    # sea level, 6k, 11k, 16k and 20k ft, and at 18,000 ft / 72 % cruise too —
-    # i.e. the model's boost is limited by an ASSUMED mechanical ceiling rather
-    # than by the compressor map. Raising it changes the story completely:
-    #   ceiling 140,000 and 172,000 rpm give IDENTICAL results (the clamp stops
-    #   binding), MAP then holds 2.20 bar to 16,000 ft and power stays flat at
-    #   166 hp to 20,000 ft — i.e. critical altitude moves to ~16k, against
-    #   DRDO's published 11,000 ft.
-    # So the published comparable containment speed (172,000 rpm, E4 / TCDS
-    # E.200) cannot simply be dropped in: the compressor and turbine sizing
-    # (Ellipse constants, n_corr_design, mdot_ex_design) must be calibrated so
-    # that critical altitude EMERGES from the map at the published 11,000 ft.
-    # That is Phase 6's job and is recorded in docs/VALIDATION-STATUS.md; until
-    # then this stays an assumed clamp doing work it should not have to do.
-    max_shaft_rpm: 110000
+    # provenance: fixed by source (2026-09-19), not fitted. Mechanical
+    # overspeed limit — bearing/blade stress ceiling every real turbo has.
+    # Without one, N_corr rising with altitude (T01 falling at fixed physical
+    # rpm) lets the Ellipse model's capacity grow without bound, and
+    # "critical altitude" stops being a real physical limit.
+    #
+    # Was 110,000 rpm (calibrated, not sourced) — sized only so it did not
+    # bind at the 18,000 ft cruise gate, and it ended up binding at every
+    # operating point instead. Replaced with 172,000 rpm: the published
+    # comparable containment speed (Austro E4 / TCDS E.200), independently
+    # corroborated by the Garrett GT1749V (see impeller_diameter_m above) —
+    # a real turbo in this power/displacement class rates its max shaft
+    # speed at 175,000 rpm, essentially the same number from an unrelated
+    # source. This is a KNOWN CONSTANT, fixed here rather than left for the
+    # optimizer to touch.
+    #
+    # This does NOT by itself reproduce the published 11,000 ft critical
+    # altitude — at 172,000 rpm the clamp stops binding entirely (measured:
+    # MAP holds 2.20 bar to 16,000 ft, power flat at 166 hp to 20,000 ft).
+    # That gap is now closed on the sourced impeller_diameter_m (49 mm, was
+    # 70 mm) instead of on this clamp: a smaller wheel cuts flow area by
+    # (49/70)^2 ~ 0.49, which is the mechanism that should pull critical
+    # altitude down toward 11,000 ft. psi_max_design/phi_max_design/
+    # n_corr_design_rpm still need Phase 6 (backend/calibrate.py) to
+    # re-derive against the new diameter — recorded in
+    # docs/VALIDATION-STATUS.md.
+    max_shaft_rpm: 172000
 
   turbine:
     # provenance: calibrated. The turbine's expansion ratio was previously
@@ -392,19 +434,27 @@ mvem:
     #   Pi_t = min(1 + gain*(mdot_ex/mdot_ex_design)^2, pressure_ratio_max)
     #
     # mdot_ex_design_kgps was originally sized for full-power sea-level
-    # exhaust flow (~0.14 kg/s). Measured directly: at 18,000 ft cruise
-    # (72% throttle) actual exhaust flow is only ~0.030 kg/s — 30% of that
-    # design point — which crushed Pi_t to ~1.08 (almost no turbine power)
-    # even though the compressor itself was perfectly capable (eta_c~0.6).
+    # exhaust flow (~0.14 kg/s), then recalibrated to the OLD 18,000 ft
+    # demo cruise point (~0.030 kg/s). Re-recalibrated 2026-09-19 to the
+    # corrected 11,000 ft/72% reference point (see gates_check.py's module
+    # docstring for why 18,000 ft was replaced) — that altitude's denser
+    # air gives a much higher actual exhaust flow, 0.0761 kg/s, measured
+    # directly from a fixed-point iteration (mdot_ex_design set to the
+    # previous iteration's measured flow, repeated to convergence — the
+    # simulation itself feeds back into what "the operating point" measures,
+    # since higher design flow changes Pi_t which changes turbo speed which
+    # changes air/exhaust flow). Converged immediately: the compressor fit
+    # (calibrate_compressor.py, unchanged from baseline against this same
+    # corrected target) and this turbine value are now mutually consistent.
     # A real turbo's nozzle area is sized for where the engine actually
     # spends its time — cruise, not the rare full-power sea-level case —
-    # so mdot_ex_design is recalibrated to that operating point instead,
-    # with the choke cap now doing the job of preventing runaway Pi_t at
-    # full power that an uncapped model would otherwise need a compromise
-    # design point to avoid.
+    # so mdot_ex_design is calibrated to that operating point instead, with
+    # the choke cap doing the job of preventing runaway Pi_t at full power
+    # that an uncapped model would otherwise need a compromise design point
+    # to avoid.
     efficiency_nominal: 0.70              # eta_t
     pressure_ratio_gain: 1.1              # backpressure build-up with exhaust flow
-    mdot_ex_design_kgps: 0.032            # calibrated to 18kft/72% cruise exhaust flow
+    mdot_ex_design_kgps: 0.0761           # calibrated to 11kft/72% cruise exhaust flow
     pressure_ratio_max: 3.2               # choke limit — typical for a small single-stage turbine
 
   wastegate:
@@ -494,15 +544,21 @@ mvem:
       # frontal_area is SIZED (not fitted to a test) for the worst cooling case
       # a real installation is sized for: HOT-DAY take-off at low airspeed.
       # First pass used the ISA-standard day (15 degC) and gave 0.067 m^2 —
-      # which then ran the coolant to 117.7 degC at ISA+20, over the 105 degC
-      # limit. Aircraft cooling is sized for the hot day, so it was re-sized
-      # against that case. Measured across a sweep (backend, 500 s to steady
-      # state, 100 % throttle, 40 m/s):
-      #   A_rad    SL ISA    SL ISA+20    18,000 ft cruise
-      #   0.067    94.6      117.7 (over)  89.3
-      #   0.078    92.8      106.1 (over)  88.1
-      #   0.086    91.8       99.5         87.4     <- chosen, 5.5 K margin
-      #   0.095    90.8       94.7         86.7
+      # which then ran the coolant over the 105 degC limit at ISA+20.
+      # Aircraft cooling is sized for the hot day, so it was re-sized against
+      # that case. Third column re-measured 2026-09-19 at the corrected
+      # 11,000 ft reference altitude (was 18,000 ft — see gates_check.py's
+      # module docstring) and against the post-compressor/turbine-fit model;
+      # the SL columns shifted too (boost/intake-temp changes reach the
+      # coolant loop even at sea level), confirmed by re-running the whole
+      # sweep rather than assuming SL was unaffected. Sizing decision
+      # (0.086) is unchanged — margin actually improved. Measured across a
+      # sweep (backend, 500 s to steady state, 100 % throttle, 40 m/s):
+      #   A_rad    SL ISA    SL ISA+20    11,000 ft cruise
+      #   0.067    93.9      107.5 (over)  92.3
+      #   0.078    92.2       97.3         90.7
+      #   0.086    91.2       94.3         89.8     <- chosen, 10.7 K margin
+      #   0.095    90.3       93.2         89.0
       # At the sizing point the thermostat is fully open, which is what "sized
       # for the worst case" means — and it is why radiator fouling shows up as
       # rising coolant temperature rather than being absorbed by the valve.
@@ -655,10 +711,17 @@ environment_presets:
   sea_level_isa:
     altitude_ft: 0
     isa_offset_K: 0
-  cruise_18k:
-    altitude_ft: 18000
+  cruise_11k:
+    altitude_ft: 11000
     isa_offset_K: 0
-    note: "nominal demo cruise point"
+    # provenance: sourced (2026-09-19, was cruise_18k / 18,000 ft, an
+    # unsourced "main.py hardcode" demo point). This is DRDO's own published
+    # VRDE critical altitude, doing double duty: 100%-throttle here tests the
+    # published envelope edge, 72%-throttle here tests that cruise sits
+    # safely inside it. See backend/gates_check.py's module docstring for
+    # the full derivation (why 18kft demanded an unrealistic PR~2.7 from a
+    # correctly-sized single-stage turbo).
+    note: "DRDO published critical altitude — cruise reference point"
   leh_hot_high:
     altitude_ft: 17664           # published: Changla trial ceiling
     isa_offset_K: 20             # ISA+20

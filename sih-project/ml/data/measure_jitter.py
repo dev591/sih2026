@@ -62,7 +62,12 @@ FAULT_HOOKS: dict[str, dict] = {
     #   map_sensor_drift, lambda_sensor_drift
 }
 
-ALT_FT, THROTTLE, N_SETTLE = 18000.0, 72.0, 12
+# 11,000 ft (was 18,000 — unsourced demo point; see backend/gates_check.py's
+# module docstring). This changes ML training data, which is Phase 7's job
+# (Phase 6 is the physics calibration this fix belongs to) — the jitter
+# measurement documented above (0.644 at jitter 0.30) is stale against the
+# new altitude reference and pending re-measurement when Phase 7 starts.
+ALT_FT, THROTTLE, N_SETTLE = 11000.0, 72.0, 12
 
 
 def _sigma_vector(n_cyl: int) -> np.ndarray:

@@ -322,7 +322,7 @@ def test_drivetrain(cfg):
     # (label, altitude_ft, throttle_pct, TAS m/s)
     cases = [
         ("sea-level take-off", 0, 100.0, 40.0),
-        ("18,000 ft cruise", 18000, 72.0, 61.2),
+        ("11,000 ft cruise", 11000, 72.0, 61.2),
         ("32,000 ft ceiling", 32000, 100.0, 61.2),
     ]
     for label, alt, thr, tas in cases:
@@ -360,7 +360,7 @@ def test_drivetrain(cfg):
     # The defining constant-speed property: change airspeed at fixed throttle
     # and the governor answers with PITCH, not rpm. A fixed-pitch propeller
     # would change rpm instead.
-    atm = isa(18000)
+    atm = isa(11000)
     betas = []
     for tas in (50.0, 70.0):
         plant = MVEM(cfg)
@@ -375,7 +375,7 @@ def test_drivetrain(cfg):
     assert betas[1] - betas[0] > 1.0, (
         f"Faster airspeed must coarsen pitch at held rpm; beta {betas[0]:.2f} -> {betas[1]:.2f}"
     )
-    print(f"  TAS 50 -> 70 m/s at 18,000 ft / 72 %: rpm held, beta {betas[0]:.1f} -> {betas[1]:.1f} deg")
+    print(f"  TAS 50 -> 70 m/s at 11,000 ft / 72 %: rpm held, beta {betas[0]:.1f} -> {betas[1]:.1f} deg")
     print("  PASSED")
 
 
@@ -397,7 +397,7 @@ def test_cooling_loop(cfg):
     cases = [
         ("sea-level take-off", 0, 100.0, 40.0, 0.0),
         ("hot-day take-off ISA+20", 0, 100.0, 40.0, 20.0),
-        ("18,000 ft cruise", 18000, 72.0, 61.2, 0.0),
+        ("11,000 ft cruise", 11000, 72.0, 61.2, 0.0),
     ]
     for label, alt, thr, tas, isa_off in cases:
         atm = isa(alt, isa_off)
