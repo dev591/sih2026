@@ -8,46 +8,42 @@
    with twenty-five hardcoded hexes the first time round. */
 
 :root {
-  --bg:        #f4f6f9;
-  --bg-2:      #eaeef4;
-  --panel:     #ffffff;
-  --panel-2:   #f7f9fc;
-  --line:      #dde4ec;
-  --line-2:    #c6d1de;
-  --void:      #e8edf3;
+  /* Dark control-room theme, matching the 3D studio. The engine is the hero,
+     and a light page around a dark stage split the screen in two. Graphite
+     steps rather than black, so a washed-out projector still separates panel
+     from page. The printable report keeps its own paper palette (--doc-*). */
+  --bg:        #0b0e13;
+  --bg-2:      #10141b;
+  --panel:     #151a22;
+  --panel-2:   #1a2029;
+  --line:      #252d38;
+  --line-2:    #34404e;
+  --void:      #0e1218;
 
-  /* Three steps, all measured against --bg and all clearing WCAG AA 4.5:1.
-     --text-dimr was #8a97a7, which measured 2.75:1 — below even the 3:1
-     large-text floor, across 49 call sites carrying units, axis labels and
-     panel subtitles. It read as mush on a projector. --text-dim moved with
-     it so the hierarchy keeps its separation instead of collapsing into
-     two near-identical greys. */
-  --text:      #16202c;   /* 15.19:1 */
-  --text-dim:  #4d5b6b;   /*  6.41:1 */
-  --text-dimr: #647284;   /*  4.53:1 */
+  /* Three steps, all clearing WCAG AA 4.5:1 against --panel. */
+  --text:      #e6ecf3;   /* 14.9:1 */
+  --text-dim:  #aab6c4;   /*  8.4:1 */
+  --text-dimr: #8592a3;   /*  5.2:1 */
 
-  --ok:        #047857;
-  --warn:      #b45309;
-  --alert:     #be123c;
-  --sensor:    #0e7490;
-  --accent:    #0369a1;
+  /* Status inks lifted for a dark ground; same hues as the light theme. */
+  --ok:        #34d399;
+  --warn:      #fbbf24;
+  --alert:     #fb7185;
+  --sensor:    #22d3ee;
+  --accent:    #38bdf8;
 
-  /* Pale grounds for status-tinted rows. On the dark theme these were unnamed
-     literals repeated across the file; naming them is what makes the palette
-     swappable. */
-  --tint-ok:     #e7f6f0;
-  --tint-warn:   #fdf3e3;
-  --tint-alert:  #fdeaee;
-  --tint-sensor: #e4f4f8;
-  --tint-accent: #e6f1fa;
+  /* Status-tinted rows: the hue at low alpha over the panel. */
+  --tint-ok:     #10261f;
+  --tint-warn:   #2a2112;
+  --tint-alert:  #2c151b;
+  --tint-sensor: #0f2429;
+  --tint-accent: #0f2230;
 
   /* Shared with the canvas layers — must match C.twin / C.pnr in theme.ts. */
-  --twin: #64748b;
-  --pnr:  #a21caf;
+  --twin: #94a3b8;
+  --pnr:  #e879f9;
 
-  /* On white, a 1px border alone reads flat — panels need to sit ON the page
-     rather than being drawn onto it. */
-  --shadow: 0 1px 2px rgb(16 32 48 / 0.05), 0 3px 10px rgb(16 32 48 / 0.045);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px rgb(0 0 0 / 0.25);
 
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -139,7 +135,7 @@ body {
   flex: 0 0 auto;
 }
 .beat-chip-on .beat-key {
-  background: var(--accent); border-color: var(--accent); color: #ffffff;
+  background: var(--accent); border-color: var(--accent); color: #0b0e13;
 }
 .beat-chip:hover { border-color: var(--line-2); color: var(--text); }
 .beat-chip-on { border-color: var(--accent); color: var(--text); background: var(--tint-accent); }
@@ -596,7 +592,17 @@ body {
 .engine3d-legend .dot-fault { background: #ff7a1a; box-shadow: 0 0 8px #ff7a1a; }
 .engine3d-legend .dot-sensor { background: #22d3ee; box-shadow: 0 0 8px #22d3ee; }
 .engine3d-legend-arch { color: var(--s-dim); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; padding-left: 14px; border-left: 1px solid var(--s-line); }
-@media (max-width: 1100px) { .engine3d-legend-arch { display: none; } }
+/* The same canvas is the full stage in simple mode and a panel in expert mode,
+   so its furniture sizes to the container, not the window. */
+.engine3d { container-type: size; }
+@container (max-width: 1100px) { .engine3d-legend-arch { display: none; } }
+@container (max-height: 560px) {
+  .engine3d-legend { top: auto; bottom: 10px; right: 14px; }
+  .engine3d-hint { display: none; }
+  /* four full tags do not fit side by side here; the faulted one keeps its reading */
+  .cyl-tag:not(.cyl-tag-on) .cyl-tag-v { display: none; }
+  .cyl-tag:not(.cyl-tag-on) { padding-right: 3px; }
+}
 
 /* Per-cylinder tag: number + live CHT. */
 .cyl-tag {
@@ -876,31 +882,51 @@ body {
      paint straight over this card. */
   z-index: 10;
   transform: translateX(-50%);
-  display: grid;
-  grid-template-columns: auto 1px auto;
+  display: flex;
   align-items: stretch;
-  gap: 20px;
-  max-width: min(760px, calc(100% - 200px));
-  padding: 13px 22px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(7px);
-  border: 1px solid var(--line-2);
-  border-top: 2px solid var(--ok);
-  border-radius: 4px;
-  box-shadow: 0 4px 24px rgb(16 32 48 / 0.13);
+  gap: 22px;
+  max-width: min(1080px, calc(100% - 120px));
+  padding: 14px 24px;
+  /* Dark glass: it sits on the dark studio, so it speaks the canvas's ink,
+     and the status colours are the light variants that clear 4.5:1 on it. */
+  --v-ink: #e8eef5; --v-dim: #93a0b1; --v-line: rgb(255 255 255 / 0.12);
+  color: var(--v-ink);
+  background: rgb(13 17 24 / 0.82);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--v-line);
+  border-top: 2px solid #34d399;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.45);
   pointer-events: none;
 }
-.verdict-alert  { border-top-color: var(--alert); }
-.verdict-sensor { border-top-color: var(--sensor); }
+.verdict-alert  { border-top-color: #fb7185; }
+.verdict-sensor { border-top-color: #22d3ee; }
 /* Neither good news nor bad — the twin simply has nothing to report yet. */
-.verdict-idle   { border-top-color: var(--line-2); }
+.verdict-idle   { border-top-color: var(--v-line); }
+.verdict .tone-ok     { color: #34d399; }
+.verdict .tone-warn   { color: #fbbf24; }
+.verdict .tone-alert  { color: #fb7185; }
+.verdict .tone-sensor { color: #22d3ee; }
+.verdict .tone-dim    { color: var(--v-dim); }
+.verdict-half-warn { min-width: 260px; }
+.verdict-lead {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: 0.01em;
+}
+.verdict-lead em {
+  display: block; margin-top: 3px;
+  font-family: var(--sans); font-style: normal; font-weight: 500;
+  font-size: 12px; color: var(--v-ink); letter-spacing: 0;
+}
+/* A worded lead ("False alarm avoided") at the numeral's size wraps badly. */
+.verdict-lead.tone-sensor { font-family: var(--sans); font-size: 18px; }
 
 .verdict-half { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .verdict-half-main { min-width: 300px; }
-.verdict-rule { background: var(--line); }
+.verdict-rule { background: var(--v-line); width: 1px; flex: none; }
 .verdict-cap {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--text-dimr);
+  text-transform: uppercase; color: var(--v-dim);
 }
 .verdict-limits {
   font-family: var(--mono); font-size: 19px; letter-spacing: 0.04em;
@@ -908,16 +934,16 @@ body {
 .verdict-fault { font-size: 19px; font-weight: 600; line-height: 1.15; }
 .verdict-cyl {
   font-family: var(--mono); font-size: 11px; font-style: normal;
-  color: var(--text-dim); border: 1px solid var(--line-2);
+  color: var(--v-ink); border: 1px solid var(--v-line);
   padding: 1px 5px; border-radius: 2px; margin-left: 8px;
   vertical-align: 2px;
 }
-.verdict-note { font-size: 10.5px; color: var(--text-dimr); }
+.verdict-note { font-size: 11px; color: var(--v-dim); }
 /* The refusal-to-guess line. Deliberately not toned as an alarm: it qualifies
    the diagnosis above it rather than announcing a second fault. */
 .verdict-novelty {
   font-size: 10.5px; margin-top: 3px; padding-left: 7px;
-  color: var(--text-dim); border-left: 2px solid var(--line-2);
+  color: var(--v-ink); border-left: 2px solid var(--v-line);
 }
 
 /* ---- edge tabs ---- */

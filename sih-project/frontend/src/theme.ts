@@ -15,45 +15,39 @@
  */
 
 export const C = {
-  // grounds
-  bg: '#f4f6f9',
-  bg2: '#eaeef4',
-  panel: '#ffffff',
-  panel2: '#f7f9fc',
-  sunken: '#e8edf3', // was --void: recessed tracks and wells
-  line: '#dde4ec',
-  line2: '#c6d1de',
+  // grounds (dark control-room theme; mirrors :root in App.css)
+  bg: '#0b0e13',
+  bg2: '#10141b',
+  panel: '#151a22',
+  panel2: '#1a2029',
+  sunken: '#0e1218',
+  line: '#252d38',
+  line2: '#34404e',
 
-  // type
-  // All three clear WCAG AA against bg. textDimr was #8a97a7 (2.75:1) and
-  // textDim #5a6a7d; see the note in App.css, which these mirror.
-  text: '#16202c',
-  textDim: '#4d5b6b',
-  textDimr: '#647284',
+  // type: all three clear WCAG AA against panel
+  text: '#e6ecf3',
+  textDim: '#aab6c4',
+  textDimr: '#8592a3',
 
-  // status
-  ok: '#047857',
-  warn: '#b45309',
-  alert: '#be123c',
-  sensor: '#0e7490',
-  accent: '#0369a1',
+  // status, lifted for a dark ground
+  ok: '#34d399',
+  warn: '#fbbf24',
+  alert: '#fb7185',
+  sensor: '#22d3ee',
+  accent: '#38bdf8',
 
-  /** Pale grounds for status-tinted rows. On dark these were unnamed literals
-   *  (`#0b1a24` appeared five times); naming them is what makes the theme
-   *  swappable at all. */
-  tintOk: '#e7f6f0',
-  tintWarn: '#fdf3e3',
-  tintAlert: '#fdeaee',
-  tintSensor: '#e4f4f8',
-  tintAccent: '#e6f1fa',
+  tintOk: '#10261f',
+  tintWarn: '#2a2112',
+  tintAlert: '#2c151b',
+  tintSensor: '#0f2429',
+  tintAccent: '#0f2230',
 
-  /** Per-cylinder series. Darkened from the old dark-theme hues so they clear
-   *  4.5:1 on white — same hue identity, readable ink. */
-  cyl: ['#1d4ed8', '#b45309', '#047857', '#6d28d9'],
+  /** Per-cylinder series, bright enough to read as lines on a dark chart. */
+  cyl: ['#60a5fa', '#fbbf24', '#34d399', '#c084fc'],
   /** Twin prediction — deliberately neutral, it is a reference not a series. */
-  twin: '#64748b',
+  twin: '#94a3b8',
   /** Point of no return. */
-  pnr: '#a21caf',
+  pnr: '#e879f9',
 } as const;
 
 /**

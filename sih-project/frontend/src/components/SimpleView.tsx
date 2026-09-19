@@ -26,7 +26,8 @@ import { FaultConsole } from './FaultConsole';
 import { MissionMap } from './MissionMap';
 import { EdgeDrawer, EdgeTab } from './EdgeDrawer';
 import { useCurrentTick, useMission } from '../state/missionStore';
-import { FAULT_LABELS, residualRow } from '../types/telemetry';
+import { FAULT_LABELS, residualRow, type RulEstimate } from '../types/telemetry';
+import { useEpisode, mmss } from '../state/episode';
 
 /**
  * Plain-English name for each of the 11 parity residuals, in the same order
@@ -135,7 +136,46 @@ function VerdictCard() {
           </span>
         )}
       </div>
+
+      {!healthy && <EarlyWarning rul={health.rul} />}
     </div>
+  );
+}
+
+/**
+ * The third column: what the twin's head start is worth. For a component
+ * fault that is time ahead of every threshold alarm plus the estimated time
+ * before it needs attention; for a sensor fault it is the false alarm, or the
+ * needless abort, that did not happen.
+ */
+function EarlyWarning({ rul }: { rul: RulEstimate }) {
+  const ep = useEpisode();
+  if (!ep) return null;
+  return (
+    <>
+      <div className="verdict-rule" aria-hidden="true" />
+      <div className="verdict-half verdict-half-warn">
+        <span className="verdict-cap">Early warning</span>
+        {ep.isSensor ? (
+          <>
+            <span className="verdict-lead tone-sensor">False alarm avoided</span>
+            <span className="verdict-note">the engine is fine; a threshold system would trust this sensor</span>
+          </>
+        ) : (
+          <>
+            <span className="verdict-lead tone-alert">
+              {ep.limitsTripped ? '' : '+'}{mmss(ep.aheadS)}
+              <em>{ep.limitsTripped ? 'before the first limit tripped' : 'ahead of every limit alarm'}</em>
+            </span>
+            <span className="verdict-note">
+              {rul.component !== 'none'
+                ? `about ${rul.reported_h.toFixed(1)} h before it needs attention (${rul.p10_h.toFixed(1)} to ${rul.p90_h.toFixed(1)} h)`
+                : `detected at ${mmss(ep.detectedT)} into the flight`}
+            </span>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 

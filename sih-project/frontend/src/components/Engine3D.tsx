@@ -59,6 +59,10 @@ function Sync({ live }: { live: Live }) {
   live.anomaly = tick.health.anomaly.score;
   live.selected = selected;
   setPartTargets(live, tick.health.diagnosis, display.running);
+  // A CHT sensor the twin says is lying must not paint its cylinder hot: show
+  // the twin's own estimate for that head instead of the bad reading.
+  live.cht = live.cht.map((c, i) =>
+    live.partTargets.has(`cht:${i}`) ? coldBlend(tick.predicted.cht_C[i], display.chtScale) : c);
 
   useFrame((_, dtRaw) => {
     // Easing must finish in real time even at a few frames per second (a

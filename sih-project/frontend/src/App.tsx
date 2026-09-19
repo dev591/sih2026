@@ -99,7 +99,17 @@ function StatusBar() {
 
 function EngineSubtitle() {
   const engine = useMission((s) => s.engine);
+  const mode = useMission((s) => s.mode);
   const paths = Object.values(engine.parityPaths).filter(Boolean).length;
+  // A first-time viewer needs to know what they are looking at, not how it
+  // works; the parity-path count is for the engineer who opens expert mode.
+  if (mode === 'simple') {
+    return (
+      <span className="brand-sub">
+        Digital twin of the {engine.name} · finds faults before any limit alarm
+      </span>
+    );
+  }
   return (
     <span className="brand-sub">
       Over-determined engine twin · {engine.name} · {paths} parity paths →{' '}

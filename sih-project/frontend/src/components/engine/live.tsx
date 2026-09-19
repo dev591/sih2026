@@ -10,7 +10,7 @@
 
 import { createContext, useContext } from 'react';
 import * as THREE from 'three';
-import type { Diagnosis, FaultId } from '../../types/telemetry';
+import { SENSOR_FAULTS, type Diagnosis, type FaultId } from '../../types/telemetry';
 
 /** A physical place on the engine a diagnosis can point at. */
 export type PartId =
@@ -115,7 +115,9 @@ export function setPartTargets(live: Live, diagnosis: Diagnosis, running: boolea
   if (!running) return;
   for (const h of diagnosis.top) {
     if (h.fault === 'healthy' || h.p < 0.05) continue;
-    const sensor = diagnosis.is_sensor_fault;
+    // Per hypothesis, not the diagnosis-wide flag: a sensor drift and an
+    // engine fault can be live at once, and each must keep its own colour.
+    const sensor = SENSOR_FAULTS.includes(h.fault);
     for (const id of FAULT_PARTS[h.fault](h.cylinder ?? null)) {
       const prev = live.partTargets.get(id);
       if (!prev || prev.p < h.p) live.partTargets.set(id, { p: h.p, sensor });

@@ -80,7 +80,7 @@ export const HEALTH_HZ = 1;
 
 /** Matches docs/pitch/demo-script.md beat for beat. */
 export const SCRIPT_BEATS = [
-  { t: 0, label: 'Healthy cruise, 18 000 ft' },
+  { t: 0, label: 'Healthy cruise' },
   { t: 40, label: 'Injector fouling begins — cylinder 2' },
   { t: 62, label: 'Anomaly score crosses threshold' },
   { t: 95, label: 'Isolation: injector fouling, cyl 2' },

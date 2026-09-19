@@ -19,7 +19,7 @@
  * watched a recording never will.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMission } from '../state/missionStore';
 import { Panel } from './Panels';
 import { SCRIPTED, type FaultConfig } from '../mock/missionGenerator';
@@ -188,10 +188,24 @@ export function FaultConsole() {
 }
 
 /** Shown after reveal, so the room can check the answer against the truth. */
+/**
+ * What was actually injected. Team-only: on a judge's screen it gives away the
+ * answer before the twin finds it, which is the one moment the demo exists
+ * for. Shown with ?team in the URL, toggled with G.
+ */
 export function InjectedTruth() {
   const config = useMission((s) => s.config);
   const blind = useMission((s) => s.blind);
-  if (blind) return null;
+  const [team, setTeam] = useState(() => new URLSearchParams(window.location.search).has('team'));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'g' || e.key === 'G') setTeam((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  if (blind || !team) return null;
 
   const entries = (Object.keys(config) as (keyof FaultConfig)[]).filter(
     (k) => k !== 'warmAirMass' && config[k]

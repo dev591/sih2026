@@ -139,6 +139,7 @@ function HeadSlice({ g, d, f, last }: { g: Geometry; d: Dims; f: CylFrame; last:
     [g.pitch, d],
   );
   const edgeMat = useMemo(() => new THREE.LineBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0, toneMapped: false }), []);
+  const probe = useMemo(() => cloneClipped(m.steel), [m]);
 
   useFrame(() => {
     const t = (live.cht[f.index] - live.chtRampFrom) / 55;
@@ -146,6 +147,9 @@ function HeadSlice({ g, d, f, last }: { g: Geometry; d: Dims; f: CylFrame; last:
     const h = live.parts.get(`cyl:${f.index}`);
     if (h) applyGlow(mat, h.p, h.sensor, live.time);
     else mat.emissiveIntensity = 0;
+    const s = live.parts.get(`cht:${f.index}`);
+    if (s) applyGlow(probe, s.p, s.sensor, live.time, 4);
+    else probe.emissiveIntensity = 0;
     const sel = live.selected === f.index ? 1 : live.hovered === f.index ? 0.5 : 0;
     edgeMat.opacity = sel;
     if (edge.current) edge.current.visible = sel > 0;
@@ -161,6 +165,12 @@ function HeadSlice({ g, d, f, last }: { g: Geometry; d: Dims; f: CylFrame; last:
       <mesh position={[f.x, d.deck + 0.45, -d.headHalfW - 0.04]} material={mat} castShadow>
         <boxGeometry args={[0.5, 0.3, 0.08]} />
       </mesh>
+      {/* CHT thermocouple boss: the sensor a CHT-drift diagnosis points at */}
+      <group position={[f.x - 0.33, d.deck + 0.72, d.headHalfW + 0.02]} rotation={[Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.05, 0]} material={probe}><cylinderGeometry args={[0.035, 0.035, 0.12, 12]} /></mesh>
+        <mesh position={[0, 0.0, 0]} material={m.steelDark}><cylinderGeometry args={[0.05, 0.05, 0.04, 6]} /></mesh>
+        <mesh position={[0, 0.13, 0]} material={m.black}><cylinderGeometry args={[0.028, 0.028, 0.06, 10]} /></mesh>
+      </group>
       {/* head bolts on the flange either side of the cam cover */}
       {[-0.28, 0.28].flatMap((dx) => [-1, 1].map((s) => (
         <mesh key={`${dx}${s}`} position={[f.x + dx, d.headTop + 0.02, s * (d.headHalfW - 0.035)]} material={m.steelDark}>
