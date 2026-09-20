@@ -8,42 +8,52 @@
    with twenty-five hardcoded hexes the first time round. */
 
 :root {
-  /* Dark control-room theme, matching the 3D studio. The engine is the hero,
-     and a light page around a dark stage split the screen in two. Graphite
-     steps rather than black, so a washed-out projector still separates panel
-     from page. The printable report keeps its own paper palette (--doc-*). */
-  --bg:        #0b0e13;
-  --bg-2:      #10141b;
-  --panel:     #151a22;
-  --panel-2:   #1a2029;
-  --line:      #252d38;
-  --line-2:    #34404e;
-  --void:      #0e1218;
+  /* Light page chrome, kept deliberately — see 23f74ca and 8d32803: metal at
+     high metalness needs a real studio environment to read on ANY backdrop
+     (fixed independently in the 3D layer), and a light page measures better
+     on a washed-out projector than a dark one competing with the stage.
+     The 3D engine stage itself stays a dark studio (SCENE in theme.ts) —
+     that split is deliberate, not a leftover. */
+  --bg:        #f4f6f9;
+  --bg-2:      #eaeef4;
+  --panel:     #ffffff;
+  --panel-2:   #f7f9fc;
+  --line:      #dde4ec;
+  --line-2:    #c6d1de;
+  --void:      #e8edf3;
 
-  /* Three steps, all clearing WCAG AA 4.5:1 against --panel. */
-  --text:      #e6ecf3;   /* 14.9:1 */
-  --text-dim:  #aab6c4;   /*  8.4:1 */
-  --text-dimr: #8592a3;   /*  5.2:1 */
+  /* Three steps, all measured against --bg and all clearing WCAG AA 4.5:1.
+     --text-dimr was #8a97a7, which measured 2.75:1 — below even the 3:1
+     large-text floor, across 49 call sites carrying units, axis labels and
+     panel subtitles. It read as mush on a projector. --text-dim moved with
+     it so the hierarchy keeps its separation instead of collapsing into
+     two near-identical greys. */
+  --text:      #16202c;   /* 15.19:1 */
+  --text-dim:  #4d5b6b;   /*  6.41:1 */
+  --text-dimr: #647284;   /*  4.53:1 */
 
-  /* Status inks lifted for a dark ground; same hues as the light theme. */
-  --ok:        #34d399;
-  --warn:      #fbbf24;
-  --alert:     #fb7185;
-  --sensor:    #22d3ee;
-  --accent:    #38bdf8;
+  --ok:        #047857;
+  --warn:      #b45309;
+  --alert:     #be123c;
+  --sensor:    #0e7490;
+  --accent:    #0369a1;
 
-  /* Status-tinted rows: the hue at low alpha over the panel. */
-  --tint-ok:     #10261f;
-  --tint-warn:   #2a2112;
-  --tint-alert:  #2c151b;
-  --tint-sensor: #0f2429;
-  --tint-accent: #0f2230;
+  /* Pale grounds for status-tinted rows. On the dark theme these were unnamed
+     literals repeated across the file; naming them is what makes the palette
+     swappable. */
+  --tint-ok:     #e7f6f0;
+  --tint-warn:   #fdf3e3;
+  --tint-alert:  #fdeaee;
+  --tint-sensor: #e4f4f8;
+  --tint-accent: #e6f1fa;
 
   /* Shared with the canvas layers — must match C.twin / C.pnr in theme.ts. */
-  --twin: #94a3b8;
-  --pnr:  #e879f9;
+  --twin: #64748b;
+  --pnr:  #a21caf;
 
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px rgb(0 0 0 / 0.25);
+  /* On white, a 1px border alone reads flat — panels need to sit ON the page
+     rather than being drawn onto it. */
+  --shadow: 0 1px 2px rgb(16 32 48 / 0.05), 0 3px 10px rgb(16 32 48 / 0.045);
 
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -135,7 +145,7 @@ body {
   flex: 0 0 auto;
 }
 .beat-chip-on .beat-key {
-  background: var(--accent); border-color: var(--accent); color: #0b0e13;
+  background: var(--accent); border-color: var(--accent); color: #ffffff;
 }
 .beat-chip:hover { border-color: var(--line-2); color: var(--text); }
 .beat-chip-on { border-color: var(--accent); color: var(--text); background: var(--tint-accent); }
