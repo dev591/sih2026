@@ -80,6 +80,12 @@ function StatusBar() {
     <div className={`ribbon${alerting ? (health.diagnosis.is_sensor_fault ? ' ribbon-sensor' : ' ribbon-alert') : ''}`}>
       <span className="ribbon-tag">ENGINE {slow.engine_id}</span>
       <span className="ribbon-item">{slow.rpm.toFixed(0)} <em>rpm</em></span>
+      <span className="ribbon-item">{slow.prop_rpm.toFixed(0)} <em>prop rpm</em></span>
+      {/* null on a fixed-pitch propeller (Rotax) — a governed blade angle only
+          exists where there is a governor to read it, never fabricated. */}
+      {slow.blade_angle_deg != null && (
+        <span className="ribbon-item">{slow.blade_angle_deg.toFixed(1)}<em>° blade</em></span>
+      )}
       <span className="ribbon-item">{slow.altitude_ft.toFixed(0)} <em>ft</em></span>
       <span className="ribbon-item">{slow.map_hPa.toFixed(0)} <em>hPa</em></span>
       <span className="ribbon-item">{(slow.fuel_flow_kgps * 3600).toFixed(1)} <em>kg/h</em></span>
