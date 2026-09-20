@@ -8,8 +8,8 @@
 
 import { create } from 'zustand';
 import {
-  generateMission,
   generateFrom,
+  freshSeed,
   SCRIPTED,
   MISSION_DURATION_S,
   type FaultConfig,
@@ -20,7 +20,13 @@ import { VRDE_180, engineById, type EngineProfile } from '../config/engines';
 import { lerpTick, smoothstep } from './interpolate';
 import type { MissionTick } from '../types/telemetry';
 
-const MISSION = generateMission();
+// A fresh seed each page load, so the very first mission a viewer sees is
+// already a genuine run, not a memorised script — see the note on `seed` in
+// MissionState for why every regeneration downstream must either reuse this
+// exact value (continuity: an already-displayed past must reproduce
+// identically) or replace it deliberately (a genuinely new run).
+const initialSeed = freshSeed();
+const MISSION = generateFrom(SCRIPTED, VRDE_180, initialSeed);
 
 /** How many live frames we retain for the scrubber and the heatmap window. */
 const LIVE_BUFFER = 900;
@@ -134,6 +140,21 @@ interface MissionState {
   startProgress: number;
   /** Commanded cruise altitude, ramping. null = the profile's own cruise. */
   altCmd: AltitudePlan | null;
+  /**
+   * The noise seed behind the CURRENT `ticks`. Actions that regenerate the
+   * mission fall into two kinds, and mixing them up is a real bug either way:
+   *   - CONTINUITY regenerations (an altitude command, or injecting a fault
+   *     `fromNow` mid-playback) MUST reuse this exact seed — the noise stream
+   *     does not branch on config, so replaying it from t=0 with the same
+   *     seed reproduces the already-displayed past exactly and only the
+   *     future (after the change) diverges. Reseeding here would retroactively
+   *     change values the viewer already saw.
+   *   - FRESH-RUN regenerations (engine start, "Demo script", "Healthy", a
+   *     full fault-console restart, switching engine) draw a new seed via
+   *     `freshSeed()` and store it here — this is what makes each run a
+   *     genuine, independent draw rather than the same script every time.
+   */
+  seed: number;
 
   startEngine: () => void;
   stopEngine: () => void;
@@ -190,12 +211,24 @@ export const useMission = create<MissionState>((set, get) => ({
   engineState: INITIAL_ENGINE_STATE,
   startProgress: INITIAL_ENGINE_STATE === 'running' ? 1 : 0,
   altCmd: null,
+  seed: initialSeed,
 
   startEngine: () => {
+    const s = get();
     // Live mode: restart the backend's run too, so the spool is followed by a
-    // fresh mission rather than dropping into one already in progress.
-    if (get().source === 'live') feed.send({ type: 'reset' });
-    set({ engineState: 'starting', startProgress: 0, index: 0, playing: false, drawer: null });
+    // fresh mission rather than dropping into one already in progress. The
+    // backend owns its own noise/physics there, so there is no local seed to
+    // manage.
+    if (s.source === 'live') {
+      feed.send({ type: 'reset' });
+      set({ engineState: 'starting', startProgress: 0, index: 0, playing: false, drawer: null });
+      return;
+    }
+    // A fresh run, not a replay of the one just watched — a new seed means
+    // the same scenario's detection timing genuinely differs start to start.
+    const seed = freshSeed();
+    const ticks = generateFrom(s.config, s.engine, seed, s.altCmd);
+    set({ seed, ticks, engineState: 'starting', startProgress: 0, index: 0, playing: false, drawer: null });
   },
 
   stopEngine: () =>
@@ -221,7 +254,8 @@ export const useMission = create<MissionState>((set, get) => ({
     // Regenerating mid-climb is safe for the same reason fault injection is:
     // the noise stream does not branch on altitude, so the past is reproduced
     // exactly and only the future bends.
-    set({ altCmd, ticks: generateFrom(s.config, s.engine, undefined, altCmd) });
+    // Same seed, deliberately: continuity, not a new run — see `seed` above.
+    set({ altCmd, ticks: generateFrom(s.config, s.engine, s.seed, altCmd) });
   },
 
   tick: () => {
@@ -301,17 +335,24 @@ export const useMission = create<MissionState>((set, get) => ({
 
     let config = cfg;
     let nextIndex = Math.max(0, Math.min(opts?.seekTo ?? 0, MISSION_DURATION_S));
+    // Preserving the visible past only means something when there IS a
+    // visible past being preserved — i.e. genuinely continuing forward from
+    // partway through a run. Anything that lands back at t=0 (no fromNow at
+    // all — "Demo script", "Healthy" — or fromNow with too little runway
+    // left, forcing a restart) is a fresh run and earns a fresh seed.
+    let continuity = false;
 
     if (opts?.fromNow) {
       // Begin the ramp just ahead of the frame being watched and leave the
       // clock alone, so the fault grows forward out of the picture instead of
       // the timeline teleporting into an already-developed one. Safe to
-      // regenerate mid-playback: the generator's noise is a seeded stream that
-      // does not branch on fault config, so the visible past is reproduced
-      // identically and only the future diverges.
+      // regenerate mid-playback while keeping the SAME seed: the generator's
+      // noise is a seeded stream that does not branch on fault config, so the
+      // visible past is reproduced identically and only the future diverges.
       const restart = !live && MISSION_DURATION_S - nowT < MIN_RUNWAY_S;
       config = stampStartT(cfg, (restart ? 0 : nowT) + INJECT_LEAD_S);
       nextIndex = restart ? 0 : s.index;
+      continuity = !restart;
     }
 
     if (live) {
@@ -333,10 +374,12 @@ export const useMission = create<MissionState>((set, get) => ({
 
     // Carry the commanded altitude across: injecting a fault must not silently
     // put the aircraft back at its book cruise altitude.
-    const ticks = generateFrom(config, s.engine, undefined, s.altCmd);
+    const seed = continuity ? s.seed : freshSeed();
+    const ticks = generateFrom(config, s.engine, seed, s.altCmd);
     set({
       ticks,
       config,
+      seed,
       blind: opts?.blind ?? false,
       index: Math.max(0, Math.min(nextIndex, ticks.length - 1)),
       playing: true,
@@ -366,8 +409,10 @@ export const useMission = create<MissionState>((set, get) => ({
    *  is genuinely a configuration change and not a rebuild. */
   setEngine: (id) => {
     const engine = engineById(id);
-    const ticks = generateFrom(get().config, engine, undefined, get().altCmd);
-    set({ engine, ticks, index: 0, playing: true, selectedCylinder: null, explainOpen: false });
+    // Index resets to 0 — no visible past to preserve, so this is a fresh run.
+    const seed = freshSeed();
+    const ticks = generateFrom(get().config, engine, seed, get().altCmd);
+    set({ engine, ticks, seed, index: 0, playing: true, selectedCylinder: null, explainOpen: false });
   },
 
   pushLive: (tick) =>
