@@ -34,6 +34,7 @@ OUT = ROOT / "ml" / "weights" / "v2"
 W = 32
 T_RUN = 300  # set from the data in load()
 PERSIST_N, PERSIST_M = 4, 5
+THR_PCT = 99.5   # M2 alarm threshold percentile of healthy validation error (--threshold-pct)
 PER_CYL = {"injector_fouling", "injection_misfire", "detonation",
            "egt_sensor_drift", "cht_sensor_drift"}
 
@@ -99,7 +100,7 @@ def train_m2(Xt, label, tr, va, dev, epochs):
     with torch.no_grad():
         for b in range(0, len(va_h), 1024):
             errs.append(ae.reconstruction_error(compress(gather(Xt, va_h[b:b + 1024])).to(dev)).cpu())
-    thr = float(np.percentile(torch.cat(errs).numpy(), 99.5))
+    thr = float(np.percentile(torch.cat(errs).numpy(), THR_PCT))
     return ae, thr, len(tr_h), len(va_h)
 
 
@@ -290,9 +291,12 @@ def novelty_index(win_mean: np.ndarray, S: np.ndarray) -> float:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
+    ap.add_argument("--threshold-pct", type=float, default=99.5)
     ap.add_argument("--epochs-m2", type=int, default=12)
     ap.add_argument("--epochs-m3", type=int, default=20)
     a = ap.parse_args()
+    global THR_PCT
+    THR_PCT = a.threshold_pct
     torch.manual_seed(0); np.random.seed(0)
     t0 = time.time()
     X, label, sev, inst, meta = load()
@@ -308,7 +312,7 @@ def main():
     print(f"runs train {len(tr)} val {len(va)} test {len(te)}  device {a.device}", flush=True)
 
     ae, thr, n_h_tr, n_h_va = train_m2(Xt, label, tr, va, a.device, a.epochs_m2)
-    print(f"  [M2] threshold (99.5th pct, val installations) = {thr:.5f}", flush=True)
+    print(f"  [M2] threshold ({THR_PCT}th pct, val installations) = {thr:.5f}", flush=True)
     m3 = train_m3(Xt, label, sev_n, sev_mask, tr, len(classes), a.device, a.epochs_m3)
 
     ae_c, m3_c = ae.cpu(), m3.cpu()

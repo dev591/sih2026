@@ -1,0 +1,275 @@
+{
+ "altitudes_ft": [
+  5000.0,
+  11000.0
+ ],
+ "throttles": [
+  56.0,
+  72.0,
+  100.0
+ ],
+ "severity_units": "fraction of the fault's modelled range",
+ "settle_s": 420,
+ "faults": {
+  "injector_fouling": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "turbo_degradation": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "cooling_fouling": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "coolant_pump_degradation": {
+   "5000@56": {
+    "s_limit": 0.01953125,
+    "limit": "cht"
+   },
+   "5000@72": {
+    "s_limit": 0.015625,
+    "limit": "cht"
+   },
+   "5000@100": {
+    "s_limit": 0.00390625,
+    "limit": "cht"
+   },
+   "11000@56": {
+    "s_limit": 0.01953125,
+    "limit": "cht"
+   },
+   "11000@72": {
+    "s_limit": 0.015625,
+    "limit": "cht"
+   },
+   "11000@100": {
+    "s_limit": 0.0078125,
+    "limit": "cht"
+   }
+  },
+  "bearing_wear": {
+   "5000@56": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   },
+   "5000@72": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   },
+   "5000@100": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   },
+   "11000@56": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   },
+   "11000@72": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   },
+   "11000@100": {
+    "s_limit": 0.01171875,
+    "limit": "oil_pressure"
+   }
+  },
+  "ring_wear": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "oil_pump_wear": {
+   "5000@56": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   },
+   "5000@72": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   },
+   "5000@100": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   },
+   "11000@56": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   },
+   "11000@72": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   },
+   "11000@100": {
+    "s_limit": 0.011718750000000002,
+    "limit": "oil_pressure"
+   }
+  },
+  "fuel_filter_clog": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "injection_misfire": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": null,
+    "limit": null
+   }
+  },
+  "detonation": {
+   "5000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "5000@100": {
+    "s_limit": 0.01171875,
+    "limit": "cht"
+   },
+   "11000@56": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@72": {
+    "s_limit": null,
+    "limit": null
+   },
+   "11000@100": {
+    "s_limit": 0.015625,
+    "limit": "cht"
+   }
+  }
+ }
+}

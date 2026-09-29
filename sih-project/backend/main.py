@@ -43,6 +43,20 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
+# Most recent frame sent to ANY websocket client, for read-only consumers (the
+# explain assistant). Each websocket owns its own engine session, so a consumer
+# that opened its own connection would see a fresh healthy engine, not the one
+# on screen. Holds exactly what was sent; nothing is derived or added here.
+_LATEST: dict = {"frame": None}
+
+
+@app.get("/latest")
+def latest_frame():
+    if _LATEST["frame"] is None:
+        return {"available": False, "frame": None}
+    return {"available": True, "frame": _LATEST["frame"]}
+
+
 cfg = load_engine_profile()   # reads PRAMANA_ENGINE env var, defaults to vrde_180
 N_CYL: int = cfg["geometry"]["cylinders"]
 _CFG_DIR = Path(__file__).parent / "config"
@@ -325,10 +339,12 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                     if inferred and k in inferred:
                         health[k] = inferred[k]
 
-                await websocket.send_json(_json_safe({
+                frame_out = _json_safe({
                     "slow": slow, "fast": fast, "health": health,
                     "predicted": predicted, "slowB": slowB,
-                }))
+                })
+                _LATEST["frame"] = frame_out
+                await websocket.send_json(frame_out)
                 await asyncio.sleep(1.0)
         except (WebSocketDisconnect, RuntimeError):
             pass
