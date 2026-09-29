@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ml.features import CHT_DEV, EGT_DEV, FEATURE_NAMES, N_FEATURES, feature_vector
+from ml.features import cht_dev, egt_dev, feature_names, feature_vector, n_cyl_from_features
 from ml.m2_autoencoder.model import LSTMAutoencoder
 from ml.m3_classifier.model import M3v2, compress
 from ml.prognostics import ENGINE_FAULTS, SENSOR_FAULTS, MissionMonteCarlo
@@ -55,6 +55,11 @@ class InferencePipeline:
         cfg = json.loads((weights_dir / "config.json").read_text())
         self.cfg = cfg
         self.classes: list[str] = cfg["classes"]
+        # cylinder count comes from the trained model itself (older configs are 4-cylinder)
+        self.feature_names: list[str] = list(cfg.get("features") or feature_names(4))
+        self.n_features = len(self.feature_names)
+        self.n_cyl = int(cfg.get("n_cyl") or n_cyl_from_features(self.n_features))
+        self.egt_dev, self.cht_dev = egt_dev(self.n_cyl), cht_dev(self.n_cyl)
         self.window = int(cfg["window"])
         comm_path = weights_dir / "commissioning.json"
         comm = json.loads(comm_path.read_text()) if comm_path.exists() else {}
@@ -69,11 +74,11 @@ class InferencePipeline:
                 "sensor offsets as faults.")
         self.baseline = np.asarray(base, np.float32)
         self.device = device
-        self.m2 = LSTMAutoencoder(input_dim=N_FEATURES, hidden_dim=64, latent_dim=16,
+        self.m2 = LSTMAutoencoder(input_dim=self.n_features, hidden_dim=64, latent_dim=16,
                                   seq_len=self.window)
         self.m2.load_state_dict(torch.load(weights_dir / "m2.pt", map_location=device))
         self.m2.eval()
-        self.m3 = M3v2(N_FEATURES, len(self.classes))
+        self.m3 = M3v2(self.n_features, len(self.classes))
         self.m3.load_state_dict(torch.load(weights_dir / "m3.pt", map_location=device))
         self.m3.eval()
         self.thr = float(cfg["m2_threshold"])
@@ -85,7 +90,10 @@ class InferencePipeline:
         self.hstd = np.asarray(cfg["healthy_std"])
         jac = json.loads((weights_dir / "jacobian.json").read_text())
         self.kf = HealthKF(np.array(jac["J"]), self.hstd)
-        self.mc = MissionMonteCarlo(self.classes)
+        # An engine onboarded through tools/onboard.py carries its own redline table next to its weights;
+        # the shipped VRDE model has none there and keeps using ml/weights/redline_table.json.
+        rl = weights_dir / "redline_table.json"
+        self.mc = MissionMonteCarlo(self.classes, table=json.loads(rl.read_text()) if rl.exists() else None)
         self.reset()
 
     def reset(self) -> None:
@@ -99,8 +107,8 @@ class InferencePipeline:
     # ── helpers ──────────────────────────────────────────────────────────────
     def _localise(self) -> int | None:
         w = np.array(self.buf)[-16:]
-        score = (np.abs(w[:, EGT_DEV].mean(0)) / self.hstd[EGT_DEV]
-                 + np.abs(w[:, CHT_DEV].mean(0)) / self.hstd[CHT_DEV])
+        score = (np.abs(w[:, self.egt_dev].mean(0)) / self.hstd[self.egt_dev]
+                 + np.abs(w[:, self.cht_dev].mean(0)) / self.hstd[self.cht_dev])
         return int(np.argmax(score)) if score.max() > 3.0 else None
 
     @staticmethod
@@ -124,7 +132,7 @@ class InferencePipeline:
             if cyl is None:
                 return None
             name = f"cd_inj_{cyl + 1}"
-        v = self.kf.theta[THETA_NAMES.index(name)]
+        v = self.kf.theta[self.kf.names.index(name)]
         return max(0.0, sign * (v - 1.0)) / ENGINE_FAULTS[fault][1]
 
     # ── one tick ─────────────────────────────────────────────────────────────
@@ -133,7 +141,7 @@ class InferencePipeline:
         self.t += 1
         z = np.asarray(feature_vector(rho, rho_ext), np.float32) - self.baseline
         self.buf.append(z)
-        w = np.zeros((self.window, N_FEATURES), np.float32)
+        w = np.zeros((self.window, self.n_features), np.float32)
         w[-len(self.buf):] = np.array(self.buf)
         x = torch.from_numpy(w)[None]
         with torch.no_grad():
@@ -242,7 +250,7 @@ class InferencePipeline:
                 key = next((k for k in self.sig_keys if k.split("@")[0] == f1), None)
             if key is not None:
                 sig_v = self.S[self.sig_keys.index(key)]
-                explain = {"features": FEATURE_NAMES, "live": [round(float(v), 2) for v in wm],
+                explain = {"features": self.feature_names, "live": [round(float(v), 2) for v in wm],
                            "signature": [round(float(v), 3) for v in sig_v],
                            "signature_key": key,
                            "match_cosine": round(float(cos[self.sig_keys.index(key)]), 3)}
@@ -275,5 +283,5 @@ class InferencePipeline:
         name, sign = THETA_OF_FAULT[fault]
         if name == "cd_inj":
             name = f"cd_inj_{(cyl or 0) + 1}"
-        v = theta[THETA_NAMES.index(name)]
+        v = theta[self.kf.names.index(name)]
         return max(0.0, sign * (v - 1.0)) / ENGINE_FAULTS[fault][1]

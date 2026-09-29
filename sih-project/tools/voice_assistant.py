@@ -151,6 +151,8 @@ def main():
     print(f"\nHold {a.key.upper()} to talk, release to send. Ctrl+C to quit.\n")
 
     history: list = []
+    import assistant_actions
+    act = assistant_actions.Actions(a.model)
     while True:
         audio = jobs.get()
         if len(audio) < native_sr * 0.3:
@@ -167,6 +169,17 @@ def main():
             print("(heard nothing)")
             continue
         print(f"you> {q}   [STT {t_stt*1000:.0f} ms]")
+
+        acted = act.route(q)          # new-engine YAML, low/high-level jobs, job status: no live engine needed
+        if acted is not None:
+            print(f"assistant> {acted}")
+            first = re.split(r"(?<=[.!?])\s+", clean_for_speech(acted))[:3]      # paths and plans are read on screen
+            say = " ".join(first) + (" The details are on screen." if len(acted) > 260 else "")
+            samples, sr = tts.create(say, voice=a.voice, speed=1.05, lang="en-us")
+            sd.play(samples, sr)
+            sd.wait()
+            history += [{"role": "user", "content": q}, {"role": "assistant", "content": acted}]
+            continue
 
         try:
             frame = ea.fetch_frame(a.ws)
@@ -185,6 +198,9 @@ def main():
             chunks = iter([ea.decision_answer(frame)])
         else:
             facts, t = ea.render(frame)
+            extra = act.code_context(q)
+            if extra:
+                facts += "\n\n" + extra
             chunks = stream_llm(a.model, facts, t, q, history)
 
         buf, spoken = "", []

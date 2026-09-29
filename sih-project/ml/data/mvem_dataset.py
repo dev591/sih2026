@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT))
 
-from ml.features import FEATURE_NAMES, feature_vector  # noqa: E402
+from ml.features import feature_names, feature_vector  # noqa: E402
 
 OUT_DIR = ROOT / "data" / "mvem_v1"
 
@@ -183,7 +183,7 @@ def main() -> None:
         installation=np.array([r["meta"]["installation"] for r in results]),
     )
     (a.out / "meta.json").write_text(json.dumps({
-        "classes": CLASSES, "features": FEATURE_NAMES,
+        "classes": CLASSES, "features": feature_names(int(_load()[0]["geometry"]["cylinders"])),
         "baselines": {str(k): v for k, v in baselines.items()},
         "commission_points": COMMISSION_POINTS,
         "runs": [r["meta"] for r in results],

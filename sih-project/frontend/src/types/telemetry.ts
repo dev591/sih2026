@@ -6,7 +6,10 @@
  * costs the team more than the feature was worth.
  */
 
-export const N_CYL = 4;
+/** Cylinders of the engine that is open. A live binding: chooseEngine() sets it before any panel renders, and the
+ *  panels are remounted (keyed by engine) so nothing keeps a stale count. 4 until an engine is chosen. */
+export let N_CYL = 4;
+export function setNCyl(n: number) { N_CYL = Math.max(1, Math.round(n)); }
 
 /** Per-cylinder values are ALWAYS length N_CYL, always the same ordering.
  *  0-indexed in code, 1-indexed in the UI. Cylinder 2 in the demo script is [1]. */

@@ -36,6 +36,9 @@ const PRAMANA_WS =
   (import.meta.env.VITE_PRAMANA_WS as string | undefined) ??
   `ws://${window.location.hostname}:8000/ws/telemetry`;
 
+/** Identifies this browser tab to the backend so the assistant reads THIS tab's engine session. */
+export const CLIENT_ID = Math.random().toString(36).slice(2, 12);
+
 const RETRY_MS = [1000, 2000, 4000, 8000, 15000];
 /** If frames stop arriving for this long we treat the link as dead and fall
  *  back, rather than showing a frozen dashboard that still claims to be live. */
@@ -52,6 +55,8 @@ class TelemetryFeed {
   private frameHandlers = new Set<FrameHandler>();
   private statusHandlers = new Set<StatusHandler>();
   private stopped = false;
+  /** Engine the socket asks the backend to run (?engine=<id>). null = simulation only, no socket. */
+  private engineId: string | null = null;
 
   private status: FeedStatus = {
     source: 'connecting',
@@ -87,6 +92,26 @@ class TelemetryFeed {
     this.statusHandlers.forEach((h) => h(this.status));
   }
 
+  private url() {
+    return this.engineId
+      ? `${PRAMANA_WS}?engine=${encodeURIComponent(this.engineId)}&client=${CLIENT_ID}`
+      : `${PRAMANA_WS}?client=${CLIENT_ID}`;
+  }
+
+  /** Point the feed at an engine and (re)connect. null = this engine has no live model: stay on the simulation. */
+  setEngine(id: string | null) {
+    this.stop();
+    this.engineId = id;
+    this.attempt = 0;
+    if (id === null) {
+      this.stopped = true;
+      this.setStatus({ source: 'simulated', error: 'simulation only for this engine', lastFrameAt: null, framesReceived: 0 });
+      return;
+    }
+    this.setStatus({ source: 'connecting', error: null, lastFrameAt: null, framesReceived: 0, url: this.url() });
+    this.start();
+  }
+
   start() {
     this.stopped = false;
     this.connect();
@@ -102,20 +127,24 @@ class TelemetryFeed {
 
   private connect() {
     if (this.stopped) return;
+    let ws: WebSocket;
     try {
-      this.ws = new WebSocket(PRAMANA_WS);
+      ws = new WebSocket(this.url());
+      this.ws = ws;
     } catch {
       this.fallback('could not open socket');
       return;
     }
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
       this.attempt = 0;
       this.setStatus({ source: 'live', error: null });
       this.armStaleTimer();
     };
 
-    this.ws.onmessage = (ev) => {
+    ws.onmessage = (ev) => {
+      if (this.ws !== ws) return;
       try {
         const tick = JSON.parse(ev.data as string) as MissionTick;
         // Guard against a half-implemented backend: a frame missing the health
@@ -135,11 +164,13 @@ class TelemetryFeed {
       }
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (this.ws !== ws) return;
       this.setStatus({ error: 'socket error' });
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
       this.fallback('backend not connected');
     };
   }

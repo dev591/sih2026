@@ -14,7 +14,8 @@ import { EngineSlot } from './components/EngineSlot';
 import { SimpleView, MissionSummary } from './components/SimpleView';
 import { useCurrentTick, useMission } from './state/missionStore';
 import { useEngineSlot } from './state/engineSlot';
-import { ENGINES } from './config/engines';
+import { EnginePicker } from './components/EnginePicker';
+import { AssistantChat } from './components/AssistantChat';
 import './App.css';
 
 /** Where the data on screen came from. Deliberately prominent: a demo must
@@ -28,19 +29,13 @@ import './App.css';
  */
 function EngineSelector() {
   const engine = useMission((s) => s.engine);
-  const setEngine = useMission((s) => s.setEngine);
+  const showPicker = useMission((s) => s.showPicker);
   return (
     <div className="eng-sel">
-      {ENGINES.map((e) => (
-        <button
-          key={e.id}
-          className={`eng-btn${engine.id === e.id ? ' eng-btn-on' : ''}`}
-          onClick={() => setEngine(e.id)}
-          title={`${e.name} — ${e.developer}`}
-        >
-          {e.short}
-        </button>
-      ))}
+      <span className="eng-cur" title={`${engine.name} — ${engine.developer}`}>{engine.short}</span>
+      <button className="eng-btn eng-btn-on" onClick={showPicker} title="Back to the engine list">
+        Change engine
+      </button>
     </div>
   );
 }
@@ -53,6 +48,7 @@ function SourceBadge() {
   const label =
     source === 'live' ? 'LIVE · ENGINE TWIN FEED'
       : source === 'connecting' ? 'CONNECTING…'
+      : error?.startsWith('simulation only') ? 'SIMULATED · NO LIVE MODEL FOR THIS ENGINE'
       : 'SIMULATED · NO BACKEND';
 
   return (
@@ -280,12 +276,14 @@ function ExpertGrid() {
 
 export default function App() {
   const mode = useMission((s) => s.mode);
+  const picked = useMission((s) => s.pickedEngineId);
   const simple = mode === 'simple';
 
   return (
     // The report is a SIBLING of .app, not a child: printing hides .app
     // entirely and lets the report stand alone as the page.
     <>
+    {picked === null && <EnginePicker />}
     <div className={`app app-${mode}`}>
       <header className="topbar">
         <div className="brand">
@@ -310,13 +308,14 @@ export default function App() {
       <InjectedTruth />
       <BeatBar />
 
-      {simple ? <SimpleView /> : <ExpertGrid />}
+      {simple ? <SimpleView key={picked ?? 'none'} /> : <ExpertGrid key={picked ?? 'none'} />}
 
       <Scrubber />
       <ExplainDrawer />
     </div>
     <Engine3DLayer />
     <FlightReport />
+    {picked !== null && <AssistantChat />}
     </>
   );
 }

@@ -35,13 +35,29 @@ def cht_dev(n_cyl: int) -> slice:
     return slice(len(BASE_NAMES) + n_cyl, len(BASE_NAMES) + 2 * n_cyl)
 
 
+def n_cyl_from_rho(rho: list) -> int:
+    """Cylinder count from the residual vector: 5 fixed residuals, one per cylinder, then oil and ripple."""
+    return len(rho) - 7
+
+
+def base_idx(n_cyl: int) -> list[int]:
+    """Indices into the residual vector of rho1, rho2, rho4, rho5, rho10 (oil), rho11 (ripple).
+    For 4 cylinders this is [0, 1, 3, 4, 9, 10], exactly as before."""
+    return [0, 1, 3, 4, 5 + n_cyl, 6 + n_cyl]
+
+
+def n_cyl_from_features(n_features: int) -> int:
+    """Inverse of len(feature_names(n)) = 12 + 2n."""
+    return (n_features - len(BASE_NAMES) - len(COMMON_EXTRA)) // 2
+
+
 def feature_vector(rho: list, rho_ext: list) -> list[float]:
-    vals = [rho[i] for i in BASE_IDX] + list(rho_ext)
+    vals = [rho[i] for i in base_idx(n_cyl_from_rho(rho))] + list(rho_ext)
     return [0.0 if v is None else float(v) for v in vals]
 
 
-# 4-cylinder aliases — kept only so the dataset job already running against
-# this module finishes; everything new calls the functions above.
+# 4-cylinder aliases — kept for older callers and for the shipped VRDE model; everything new calls the
+# functions above with the engine's own cylinder count.
 EXTRA_NAMES = extra_names(4)
 FEATURE_NAMES = feature_names(4)
 N_FEATURES = len(FEATURE_NAMES)

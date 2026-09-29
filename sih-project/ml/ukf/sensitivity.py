@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT))
 
 from ml.features import feature_vector  # noqa: E402
-from ml.ukf.filter import JACOBIAN_PATH, PARAMS  # noqa: E402
+from ml.ukf.filter import JACOBIAN_PATH, params_for  # noqa: E402
 
 ALT, THR, SETTLE, AVG = 11000.0, 72.0, 420, 40
 DELTA = 0.05
@@ -71,6 +71,8 @@ def _job(item):
 
 
 def main():
+    from twin.profiles import load_engine_profile, DEFAULT_ENGINE
+    PARAMS = params_for(int(load_engine_profile(DEFAULT_ENGINE)["geometry"]["cylinders"]))
     with Pool(7) as pool:
         base = pool.apply_async(_features, (None,))
         cols = pool.map(_job, PARAMS)

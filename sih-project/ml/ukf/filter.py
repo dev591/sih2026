@@ -28,16 +28,17 @@ import numpy as np
 JACOBIAN_PATH = Path(__file__).resolve().parents[1] / "weights" / "v2" / "jacobian.json"
 
 # name, nominal, lower, upper — bounds are the fault model's own clamps
-# (backend/twin/faults.py) with a little headroom.
-PARAMS = [
-    ("eta_v_scale", 1.0, 0.5, 1.1), ("eta_c_scale", 1.0, 0.5, 1.1),
-    ("hA_scale", 1.0, 0.4, 1.2),
-    ("cd_inj_1", 1.0, 0.3, 1.1), ("cd_inj_2", 1.0, 0.3, 1.1),
-    ("cd_inj_3", 1.0, 0.3, 1.1), ("cd_inj_4", 1.0, 0.3, 1.1),
-    ("f_fric_scale", 1.0, 0.9, 2.4), ("rad_eff_scale", 1.0, 0.4, 1.1),
-    ("cool_pump_scale", 1.0, 0.3, 1.1), ("oil_pump_scale", 1.0, 0.1, 1.1),
-    ("fuel_rail_scale", 1.0, 0.2, 1.1),
-]
+# (backend/twin/faults.py) with a little headroom. One cd_inj per cylinder.
+def params_for(n_cyl: int) -> list[tuple]:
+    return ([("eta_v_scale", 1.0, 0.5, 1.1), ("eta_c_scale", 1.0, 0.5, 1.1), ("hA_scale", 1.0, 0.4, 1.2)]
+            + [(f"cd_inj_{c}", 1.0, 0.3, 1.1) for c in range(1, n_cyl + 1)]
+            + [("f_fric_scale", 1.0, 0.9, 2.4), ("rad_eff_scale", 1.0, 0.4, 1.1),
+               ("cool_pump_scale", 1.0, 0.3, 1.1), ("oil_pump_scale", 1.0, 0.1, 1.1),
+               ("fuel_rail_scale", 1.0, 0.2, 1.1)])
+
+
+N_FIXED_PARAMS = 8                      # every parameter that is not a per-cylinder injector
+PARAMS = params_for(4)                  # the 4-cylinder list, kept for older callers
 THETA_NAMES = [p[0] for p in PARAMS]
 THETA_NOM = np.array([p[1] for p in PARAMS])
 THETA_MIN = np.array([p[2] for p in PARAMS])
@@ -51,26 +52,33 @@ class HealthKF:
             d = json.loads(JACOBIAN_PATH.read_text())
             J, r_std = np.array(d["J"]), np.array(d["r_std"])
         self.J = np.asarray(J, float)                       # (F, P)
+        # the number of cylinders is the number of parameters minus the fixed ones
+        self.n_cyl = self.J.shape[1] - N_FIXED_PARAMS
+        params = params_for(self.n_cyl)
+        self.names = [p[0] for p in params]
+        self.nom = np.array([p[1] for p in params])
+        self.lo = np.array([p[2] for p in params])
+        self.hi = np.array([p[3] for p in params])
         self.R = np.diag(np.maximum(np.asarray(r_std, float), 0.05) ** 2)
-        self.Q = np.eye(len(PARAMS)) * q
+        self.Q = np.eye(len(params)) * q
         self.p0 = p0
         self.reset()
 
     def reset(self) -> None:
-        self.theta = THETA_NOM.copy()
-        self.P = np.eye(len(PARAMS)) * self.p0
+        self.theta = self.nom.copy()
+        self.P = np.eye(len(self.nom)) * self.p0
         self.nis: list[float] = []
 
     def step(self, z: np.ndarray) -> np.ndarray:
         """z: baseline-subtracted feature vector (ml/features.py order)."""
         self.P = self.P + self.Q
-        x = self.theta - THETA_NOM
+        x = self.theta - self.nom
         S = self.J @ self.P @ self.J.T + self.R
         Si = np.linalg.inv(S)
         K = self.P @ self.J.T @ Si
         innov = z - self.J @ x
-        self.theta = np.clip(THETA_NOM + x + K @ innov, THETA_MIN, THETA_MAX)
-        self.P = (np.eye(len(PARAMS)) - K @ self.J) @ self.P
+        self.theta = np.clip(self.nom + x + K @ innov, self.lo, self.hi)
+        self.P = (np.eye(len(self.nom)) - K @ self.J) @ self.P
         self.P = (self.P + self.P.T) / 2.0
         self.nis = (self.nis + [float(innov @ Si @ innov)])[-100:]
         return self.theta.copy()
@@ -86,11 +94,11 @@ class HealthKF:
         dashboard reads, plus the parameters the engine model gained since."""
         s = self.sigma()
         v = {n: (round(float(self.theta[i]), 4), round(float(s[i]), 4))
-             for i, n in enumerate(THETA_NAMES)}
+             for i, n in enumerate(self.names)}
         out = {k: {"value": v[k][0], "sigma": v[k][1]}
                for k in ("eta_v_scale", "eta_c_scale", "hA_scale", "f_fric_scale",
                          "rad_eff_scale", "cool_pump_scale", "oil_pump_scale",
                          "fuel_rail_scale")}
-        out["cd_inj"] = {"value": [v[f"cd_inj_{c}"][0] for c in range(1, 5)],
-                         "sigma": [v[f"cd_inj_{c}"][1] for c in range(1, 5)]}
+        out["cd_inj"] = {"value": [v[f"cd_inj_{c}"][0] for c in range(1, self.n_cyl + 1)],
+                         "sigma": [v[f"cd_inj_{c}"][1] for c in range(1, self.n_cyl + 1)]}
         return out

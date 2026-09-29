@@ -35,7 +35,7 @@ RESIDUALS = {
     "rho3_sd_vs_restr": "rho3 — air mass: speed-density vs intake restriction (not available on this engine)",
     "rho4_energy": "rho4 — first-law energy balance: fuel energy in vs heat + work out",
     "rho5_power": "rho5 — shaft power: engine model vs propeller-as-dynamometer",
-    "rho6_9_cyl_dev": "rho6-rho9 — per-cylinder thermal deviation (cylinders 1-4)",
+    "rho6_9_cyl_dev": "rho6-rho9 — per-cylinder thermal deviation (one value per cylinder)",
     "rho10_oil": "rho10 — oil pressure vs bearing-clearance model",
     "rho11_ripple": "rho11 — crankshaft 0.5-order speed ripple (one cylinder weaker than the rest)",
 }
@@ -45,31 +45,37 @@ DECISION_Q = re.compile(
     re.I,
 )
 
-SYSTEM = """You are the PRAMANA engine-health assistant for a DRDO UAV aero-diesel.
-You EXPLAIN the engine-health facts below in plain spoken English. Rules:
-- Use ONLY the FACTS below. If something is not in them, say "I don't have that data."
-- Never invent a number. When you do quote one, quote it exactly as given, with units.
-- Never recommend, advise or decide an action. The mission layer owns decisions.
-- Residuals are in sigma (standard deviations of healthy noise). |value| under 2 is normal.
-- FIRST decide what kind of question it is, and answer THAT question — not the fault story:
-  * A question about a specific reading ("temp of cylinder 1", "oil pressure", "what rpm"): give that value with its
-    unit in one short sentence. "Temperature" of a cylinder means its cylinder head temperature (CHT); give the
-    exhaust temperature too only if asked or if it is what they mean. Do NOT talk about faults unless the user asks
-    or that exact reading is far from the healthy-twin value — then add ONE short clause about it.
-  * A question about the engine state or a fault ("what is wrong", "how is it", "what do you think"): give the picture:
-    what the ML thinks is wrong, which cylinder or system, how sure, and what that most likely means physically.
-  Talk like a knowledgeable colleague, in plain words, not a data dump.
-- Mention only the one or two numbers that matter for the point. Do NOT list residuals, sensors or sigma values
-  unless the user asks for them. If the user asks for a specific value (e.g. "what is the oil temperature"),
-  give exactly that value and nothing more.
-- For a general "how is the engine" question with nothing wrong, say it looks healthy in one sentence.
-- Give your own reading of the facts when asked what you think, and say "I think" so it is clear it is
-  interpretation, but never state a number that is not in the facts. Mention when two faults cannot be told apart.
-- If the novelty test is exceeded, say the ML has not seen this kind of fault and the ranking is not reliable.
-- When asked how long it will last or how bad it is: there is no remaining-life estimate, so say that, but DO
-  describe the current state (e.g. how much of a component's health is lost) and whether it is getting worse
-  or stable, using the trend facts. Never predict a time to failure.
-- Keep it to 2-3 short sentences.
+SYSTEM = """You are the PRAMANA engine-health analyst for a DRDO UAV aero-diesel. You can see everything the
+digital twin knows about the engine right now (the FACTS below). Observe them, think, then tell the user what you
+actually conclude, in plain spoken English, like a knowledgeable colleague.
+
+How to think:
+- Look at ALL the evidence: measured values against what a healthy twin predicts, the residuals (in sigma, standard
+  deviations of healthy noise; |value| under 2 is normal), the estimated health parameters (1.0 = nominal), how things
+  are changing, and what the ML layer says. The ML alarm is ONE input, not the verdict. You are not limited to it.
+- If the evidence shows something off but the ML has not alarmed, say so plainly ("early sign: ...; the ML hasn't
+  confirmed it yet"). If the ML alarms but the evidence looks weak, say that. If everything is inside normal, say the
+  engine looks healthy. "No alarm" never proves health, and a quiet gate never overrides what the numbers show.
+- Reason about causes physically (what a cylinder running cold, an oil-pressure drop, a boost shortfall usually mean),
+  say "I think" for interpretation, and say how sure you are. If two causes look alike, say so.
+- If the novelty test is exceeded, say the ML has not seen this kind of fault and its ranking is not reliable.
+
+What you may and may not say:
+- Every number you quote must come from the FACTS, with its unit; never invent one. If something is not in the FACTS,
+  say you don't have it.
+- If the FACTS include a CODE MAP and relevant code, that IS your knowledge of the project: explain from it and cite the
+  file. Say you don't know only if the code shown does not answer.
+- Never recommend, advise or decide an action (land, derate, continue): the mission layer owns decisions.
+- There is no remaining-life estimate unless the FACTS give one; never predict a time to failure. You can still say how
+  much has degraded and whether it is getting worse or stable.
+
+How to answer:
+- Answer the question that was asked. A question about one reading ("temp of cylinder 1", "oil pressure") gets that
+  value in one short sentence ("temperature" of a cylinder means its head temperature); add one clause only if that
+  reading is clearly off. A question about the engine's state, a fault or "what do you think" gets your analysis: what
+  you observe, what you conclude, how sure you are.
+- Do not recite lists of numbers. Pick the two or three that carry the point.
+- Keep it to 2-4 short sentences.
 
 FACTS (live, t = {t} s):
 {facts}
@@ -149,6 +155,47 @@ def trend_lines(hist: list) -> list:
     return out
 
 
+def departures(frame: dict) -> str:
+    """What is measurably off right now, found in code from the frame — so the model can observe it even when the
+    ML has not alarmed yet. Thresholds are ~4x healthy noise; they only decide what gets LISTED, not what is a fault."""
+    s, h, pr = frame.get("slow") or {}, frame.get("health") or {}, frame.get("predicted") or {}
+    out = []
+    for name, unit, lim in (("egt_C", "C", 8.0), ("cht_C", "C", 6.0)):
+        meas, twin = s.get(name), pr.get(name)
+        if isinstance(meas, list) and isinstance(twin, list):
+            for i, (m, t) in enumerate(zip(meas, twin)):
+                if m is not None and t is not None and abs(m - t) >= lim:
+                    out.append(f"{name.split('_')[0].upper()} cylinder {i + 1}: {m:.0f} {unit} measured vs {t:.0f} {unit} healthy twin ({m - t:+.0f})")
+    for name, label, unit, rel, ab, nd in (("oil_press_bar", "oil pressure", "bar", None, 0.15, 2),
+                                           ("map_hPa", "manifold pressure", "hPa", 0.03, None, 0),
+                                           ("fuel_flow_kgps", "fuel flow", "kg/s", 0.04, None, 5)):
+        m, t = s.get(name), pr.get(name)
+        if m is None or t in (None, 0):
+            continue
+        if (rel and abs(m - t) / abs(t) >= rel) or (ab and abs(m - t) >= ab):
+            out.append(f"{label}: {m:.{nd}f} {unit} measured vs {t:.{nd}f} {unit} healthy twin ({(m - t) / t * 100:+.0f}%)")
+    rho = h.get("rho") or {}
+    for key, label in RESIDUALS.items():
+        v = rho.get(key)
+        vals = v if isinstance(v, list) else [v]
+        for i, x in enumerate(vals):
+            if x is not None and abs(x) >= 2.0:
+                where = f" cylinder {i + 1}" if isinstance(v, list) else ""
+                out.append(f"residual {key}{where} = {x:+.1f} sigma")
+    for k, x in (h.get("rho_ext") or {}).items():
+        if x is not None and abs(x) >= 2.0:
+            out.append(f"residual {k} = {x:+.1f} sigma")
+    for k, d in (h.get("theta") or {}).items():
+        v = d.get("value")
+        vs = v if isinstance(v, list) else [v]
+        for i, x in enumerate(vs):
+            if x is not None and abs(x - 1.0) >= 0.05:
+                out.append(f"health parameter {k}{'' if not isinstance(v, list) else f' cylinder {i + 1}'} = {x:.2f} (nominal 1.0)")
+    if not out:
+        return "Notable departures from healthy: NONE — every residual is within 2 sigma and the measured values match the healthy twin."
+    return "Notable departures from healthy (found automatically, strongest evidence first-hand): " + "; ".join(out[:10]) + "."
+
+
 def render(frame: dict) -> tuple[str, float]:
     s, h = frame.get("slow", {}), frame.get("health", {})
     lines = []
@@ -177,6 +224,12 @@ def render(frame: dict) -> tuple[str, float]:
     dg = h.get("diagnosis") or {}
     if dg.get("unavailable"):
         lines.append("Diagnosis: UNAVAILABLE this tick (ML layer offline) — there is no fault call.")
+    elif an and not (an.get("persistence") or {}).get("met") and an.get("score") is not None:
+        # The classifier only runs after the anomaly gate alarms; before that its percentages mean nothing
+        # (the served 'healthy 39%' is not a health score).
+        lines.append(f"ML status: the anomaly gate has NOT alarmed (score {an['score']:.3f}, threshold {an.get('threshold')}). "
+                     "That does not prove the engine is healthy — judge from the departures listed below. The classifier's "
+                     "percentages are not computed before an alarm: never quote them.")
     elif dg.get("top"):
         tops = []
         for hyp in dg["top"][:3]:
@@ -247,6 +300,7 @@ def render(frame: dict) -> tuple[str, float]:
         lines.append(f"Mission: point of no return in {fmt(mi.get('point_of_no_return_s'),0)} s; "
                      f"recommended power {fmt(mi.get('recommended_power_pct'),0)} %.")
     lines.extend(trend_lines(list(HIST)))
+    lines.insert(1, departures(frame))
     unm = h.get("unmodelled")
     if unm:
         lines.append("Channels NOT modelled (no data, never guess them): " + ", ".join(map(str, unm)) + ".")
@@ -292,12 +346,23 @@ def main():
     threading.Thread(target=poll, daemon=True).start()
     if a.once:
         time.sleep(12)   # let the sampler collect a little history
-    qs = [a.once] if a.once else None
+    qs = [x.strip() for x in a.once.split("||")] if a.once else None   # "a || b" = several turns, one session
+    import assistant_actions
+    act = assistant_actions.Actions(a.model)
     print(f"PRAMANA explain assistant · model {a.model} · live feed {a.ws}")
     while True:
         q = qs.pop(0) if qs else (None if a.once else input("\nyou> ").strip())
         if not q:
             if a.once:
+                break
+            continue
+        if a.once:
+            print(f"\nyou> {q}")
+        acted = act.route(q)          # onboarding / low- and high-level jobs / job status (no engine needed)
+        if acted is not None:
+            print("\nassistant>", acted)
+            history += [{"role": "user", "content": q}, {"role": "assistant", "content": acted}]
+            if a.once and not qs:
                 break
             continue
         try:
@@ -311,10 +376,13 @@ def main():
             ans = decision_answer(frame)
         else:
             facts, t = render(frame)
+            extra = act.code_context(q)
+            if extra:
+                facts += "\n\n" + extra
             ans = ask(a.model, facts, t, q, history)
         history += [{"role": "user", "content": q}, {"role": "assistant", "content": ans}]
         print("\nassistant>", ans)
-        if a.once:
+        if a.once and not qs:
             break
 
 

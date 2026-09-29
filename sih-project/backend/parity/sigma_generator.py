@@ -317,7 +317,10 @@ def write_fault_dataset(cfg: dict, out_dir: Path) -> None:
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    n_cyl_scn = cfg["geometry"]["cylinders"]
     for scenario in FAULT_SCENARIOS:
+        if any(v.get("cyl", 0) >= n_cyl_scn for v in scenario["config"].values() if isinstance(v, dict)):
+            continue                       # this scenario names a cylinder the engine does not have
         name = scenario["name"]
         fault_config = scenario["config"]
         print(f"  Generating fault run: {name} ...")
@@ -464,12 +467,9 @@ def main() -> None:
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(sigma, f, indent=2)
 
-    labels = [
-        "rho1_sd_vs_comp",   "rho2_sd_vs_lambda", "rho3_sd_vs_restr",
-        "rho4_energy",       "rho5_power",
-        "rho6_cyl_dev",      "rho7_cyl_dev",       "rho8_cyl_dev",
-        "rho9_cyl_dev",      "rho10_oil",           "rho11_ripple",
-    ]
+    n_cyl = cfg["geometry"]["cylinders"]
+    labels = (["rho1_sd_vs_comp", "rho2_sd_vs_lambda", "rho3_sd_vs_restr", "rho4_energy", "rho5_power"]
+              + [f"rho{6 + i}_cyl_dev" for i in range(n_cyl)] + ["rho_oil", "rho_ripple"])
     print(
         f"Sampled {raw.shape[0]} healthy points across "
         f"{len(operating_points(cfg))} operating points."

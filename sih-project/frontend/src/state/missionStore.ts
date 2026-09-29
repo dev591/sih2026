@@ -17,6 +17,7 @@ import {
 import { feed, type FeedSource } from '../net/feed';
 import { VRDE_180, engineById, type EngineProfile } from '../config/engines';
 import { lerpTick, smoothstep } from './interpolate';
+import { setNCyl } from '../types/telemetry';
 import type { MissionTick } from '../types/telemetry';
 
 // A fresh seed each page load, so the very first mission a viewer sees is
@@ -187,6 +188,12 @@ interface MissionState {
   ) => void;
   reveal: () => void;
   setEngine: (id: string) => void;
+  /** Engine chosen on the landing screen. null = the picker is showing and no live socket is open. */
+  pickedEngineId: string | null;
+  /** Start a fresh run on this engine. `live` = the backend can run it (opens ?engine=<id>); otherwise the
+   *  UI's own simulation is used and the source badge says so. */
+  chooseEngine: (profile: EngineProfile, live: boolean) => void;
+  showPicker: () => void;
   setMode: (m: Mode) => void;
   toggleMode: () => void;
   setDrawer: (d: Drawer | null) => void;
@@ -209,6 +216,7 @@ export const useMission = create<MissionState>((set, get) => ({
   config: HEALTHY,
   blind: false,
   engine: VRDE_180,
+  pickedEngineId: null,
   mode: storedMode(),
   drawer: null,
   reportOpen: false,
@@ -419,6 +427,20 @@ export const useMission = create<MissionState>((set, get) => ({
     set({ engine, ticks, seed, index: 0, playing: true, selectedCylinder: null, explainOpen: false });
   },
 
+  chooseEngine: (engine, live) => {
+    setNCyl(engine.cylinders);
+    const seed = freshSeed();
+    const ticks = generateFrom(HEALTHY, engine, seed, null);
+    set({ engine, pickedEngineId: engine.id, ticks, seed, index: 0, playing: true, selectedCylinder: null,
+          explainOpen: false, config: HEALTHY, blind: false, altCmd: null, liveFrames: 0, drawer: null });
+    feed.setEngine(live ? engine.id : null);
+  },
+
+  showPicker: () => {
+    feed.stop();
+    set({ pickedEngineId: null, explainOpen: false, drawer: null });
+  },
+
   pushLive: (tick) =>
     set((s) => {
       // First live frame replaces the simulated mission entirely, so the two
@@ -479,7 +501,7 @@ feed.onStatus((st) =>
   useMission.getState().setFeed(st.source, st.error, st.framesReceived)
 );
 feed.onFrame((tick) => useMission.getState().pushLive(tick));
-feed.start();
+// The feed is started by chooseEngine() once an engine has been picked on the landing screen.
 
 // Dev-only handle, so the running timeline can be inspected from the console
 // during a rehearsal without wiring temporary logging through components.

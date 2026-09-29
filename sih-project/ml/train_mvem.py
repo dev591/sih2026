@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ml.features import CHT_DEV, EGT_DEV, FEATURE_NAMES
+from ml.features import cht_dev, egt_dev, feature_names, n_cyl_from_features
 from ml.m2_autoencoder.model import LSTMAutoencoder
 from ml.m3_classifier.model import M3v2, compress
 from ml.prognostics import ENGINE_FAULTS, SENSOR_FAULTS
@@ -35,6 +35,12 @@ W = 32
 T_RUN = 300  # set from the data in load()
 PERSIST_N, PERSIST_M = 4, 5
 THR_PCT = 99.5   # M2 alarm threshold percentile of healthy validation error (--threshold-pct)
+# Cylinder-count dependent names and slices. load() sets them from the dataset (so any cylinder count works);
+# these 4-cylinder defaults are what every function sees before then.
+N_CYL = 4
+FEATURE_NAMES = feature_names(4)
+EGT_DEV, CHT_DEV = egt_dev(4), cht_dev(4)
+
 PER_CYL = {"injector_fouling", "injection_misfire", "detonation",
            "egt_sensor_drift", "cht_sensor_drift"}
 
@@ -46,8 +52,12 @@ def load():
     inst = d["installation"]
     base = np.array([meta["baselines"][str(i)] for i in inst], np.float32)
     X = X - base[:, None, :]
-    global T_RUN
+    global T_RUN, N_CYL, FEATURE_NAMES, EGT_DEV, CHT_DEV
     T_RUN = X.shape[1]
+    N_CYL = n_cyl_from_features(X.shape[2])
+    FEATURE_NAMES = list(meta.get("features") or feature_names(N_CYL))
+    assert len(FEATURE_NAMES) == X.shape[2], "dataset features do not match its cylinder count"
+    EGT_DEV, CHT_DEV = egt_dev(N_CYL), cht_dev(N_CYL)
     return X, d["label"].astype(np.int64), d["severity"], inst, meta
 
 
@@ -270,7 +280,7 @@ def signatures(X, label, sev_n, classes, runs, meta):
             m &= (sev_n > 0.15) & (sev_n < 0.7)
         groups = [(name, m)]
         if name in PER_CYL:
-            groups = [(f"{name}@{k}", m & (cyl_of_run[:, None] == k)) for k in range(4)]
+            groups = [(f"{name}@{k}", m & (cyl_of_run[:, None] == k)) for k in range(N_CYL)]
         for key, mm in groups:
             if mm.sum() < 20:
                 continue
@@ -345,7 +355,7 @@ def main():
     torch.save(ae_c.state_dict(), OUT / "m2.pt")
     torch.save(m3_c.state_dict(), OUT / "m3.pt")
     (OUT / "config.json").write_text(json.dumps({
-        "classes": classes, "features": FEATURE_NAMES, "window": W,
+        "classes": classes, "features": FEATURE_NAMES, "n_cyl": N_CYL, "window": W,
         "m2_threshold": thr, "persistence": {"n": PERSIST_N, "of": PERSIST_M},
         "ambiguity_groups": groups,
         "signatures": sigs,
