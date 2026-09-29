@@ -127,6 +127,48 @@ say it has no data), "should I land" (must NOT advise — the code answers from
 the mission layer). Small models invent facts — check every number it says
 against the frame.
 
+### 6b. Voice: speech in, speech out — FULLY LOCAL (nothing written yet)
+User requirement: DRDO telemetry must never leave the machine, so NO cloud
+STT/LLM/TTS APIs. Pipeline to build on top of `tools/explain_assistant.py`:
+- **STT:** whisper.cpp (or `faster-whisper` in Python; CUDA if there is an
+  NVIDIA GPU), small/base English model, **push-to-talk** (hold a key).
+- **LLM:** the Ollama model from step 6, via the same grounded prompt. Keep
+  the code-level rule: decision questions are answered from the mission layer,
+  never by the model. READ-ONLY — it can never change the engine or inject
+  faults.
+- **TTS:** Kokoro (e.g. `kokoro-onnx` / `kokoro` Python package; Piper is
+  archived as of Oct 2025). Speak short answers.
+- Latency targets: STT ≤ 300 ms, first LLM token ≤ 400 ms, first audio
+  ≤ 200 ms (~1–1.5 s speech-to-speech). Measure and report the real numbers.
+- Prove zero network egress (e.g. run with the network off, or show no
+  outbound connections) — that is a judge-facing claim.
+- Optional: a mic button in the frontend that calls a local endpoint.
+Do this AFTER steps 1–6 work; it must not put the recording at risk.
+
+### 6c. Adding a new engine — profile YAML generation (engine-agnostic pitch)
+The pitch: a new engine is added through a structured form or the voice agent,
+which produces an engine profile YAML — no code changes. What exists:
+- Profiles: `sih-project/config/engine_vrde_180.yaml` (and the Rotax 914
+  profile), loaded through `backend/twin/profiles.py` (`list_engines`,
+  `load_engine_profile(id)`, `artifact_dir(id, kind)`).
+- `python -m twin.validate_profile [--engine ID | --all] [--strict]` (from
+  `backend/`) — flags missing required fields (ERROR) and assumed or
+  unsourced ones (WARNING). An AI-generated YAML MUST pass this before use.
+- Per-engine σ: `python -m parity.sigma_generator --engine ID` →
+  `backend/config/engines/<id>/`.
+What is NOT done (be honest if a judge asks, do not claim it works):
+- the form / voice flow that writes the YAML;
+- `ml/onboard.py`, one command: profile → validate → σ → dataset → train →
+  prognostics → commissioning;
+- dataset/train/inference/prognostics/commission still default to the VRDE
+  profile and `ml/features.py` still exports 4-cylinder aliases (EGT_DEV,
+  CHT_DEV); the frontend assumes N_CYL = 4 and diesel labels;
+- `gates_check.py` should read each profile's own `validation_anchors`.
+If time allows after recording prep: build a small form (fields = what
+`validate_profile` requires, each with value + source + "assumed" flag) that
+writes the YAML and runs the validator. Never hardcode "VRDE" or 4 cylinders
+in new code. Every generated field must carry its provenance.
+
 ### 7. Hand over
 Tell the user, in plain words: the real measured accuracy numbers (with n),
 what each fault does in the live demo, the known ambiguities, and the exact
