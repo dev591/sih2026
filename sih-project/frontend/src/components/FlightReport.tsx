@@ -257,29 +257,29 @@ export function FlightReport() {
             <tbody>
               <tr>
                 <td>Volumetric efficiency scale η<sub>v</sub></td>
-                <td className="num">{fmt(theta.eta_v_scale.value, 3)}</td>
-                <td className="num">{fmt(theta.eta_v_scale.sigma, 3)}</td>
+                <td className="num">{fmt(theta?.eta_v_scale?.value ?? 1, 3)}</td>
+                <td className="num">{fmt(theta?.eta_v_scale?.sigma ?? 0, 3)}</td>
               </tr>
               <tr>
                 <td>Compressor efficiency scale η<sub>c</sub></td>
-                <td className="num">{fmt(theta.eta_c_scale.value, 3)}</td>
-                <td className="num">{fmt(theta.eta_c_scale.sigma, 3)}</td>
+                <td className="num">{fmt(theta?.eta_c_scale?.value ?? 1, 3)}</td>
+                <td className="num">{fmt(theta?.eta_c_scale?.sigma ?? 0, 3)}</td>
               </tr>
               <tr>
                 <td>Cooling effectiveness scale (hA)</td>
-                <td className="num">{fmt(theta.hA_scale.value, 3)}</td>
-                <td className="num">{fmt(theta.hA_scale.sigma, 3)}</td>
+                <td className="num">{fmt(theta?.hA_scale?.value ?? 1, 3)}</td>
+                <td className="num">{fmt(theta?.hA_scale?.sigma ?? 0, 3)}</td>
               </tr>
               <tr>
                 <td>Friction scale f<sub>fric</sub></td>
-                <td className="num">{fmt(theta.f_fric_scale.value, 3)}</td>
-                <td className="num">{fmt(theta.f_fric_scale.sigma, 3)}</td>
+                <td className="num">{fmt(theta?.f_fric_scale?.value ?? 1, 3)}</td>
+                <td className="num">{fmt(theta?.f_fric_scale?.sigma ?? 0, 3)}</td>
               </tr>
               {Array.from({ length: N_CYL }, (_, i) => (
                 <tr key={i}>
                   <td>Injector discharge coefficient C<sub>d</sub> — cylinder {i + 1}</td>
-                  <td className="num">{fmt(theta.cd_inj.value[i], 3)}</td>
-                  <td className="num">{fmt(theta.cd_inj.sigma[i], 3)}</td>
+                  <td className="num">{fmt(theta?.cd_inj?.value?.[i] ?? 1, 3)}</td>
+                  <td className="num">{fmt(theta?.cd_inj?.sigma?.[i] ?? 0, 3)}</td>
                 </tr>
               ))}
             </tbody>

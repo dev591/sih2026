@@ -793,12 +793,20 @@ function makeTick(
   const mission: HealthFrame['mission'] = {
     p_complete_continue: p_continue,
     p_complete_derate: p_derate,
+    // The scripted mission is a fixed 300 s beat, not a live fuel-tracked
+    // sortie (see backend/main.py's MISSION_FUEL_KG for the real version)
+    // — this SIMULATED path doesn't integrate a fuel state, so these four
+    // are fixed rather than faking a computation the mock never runs.
     p_complete_rtb: 0.99,
     derate_cost_min_on_station: 40,
     recommended: p_continue < 0.85 ? 'derate' : 'continue',
     recommended_power_pct: p_continue < 0.85 ? 78 : 100,
     recommended_boost_hPa: p_continue < 0.85 ? 1120 : 1187,
     point_of_no_return_s: 9240 - t * 6,
+    assumed_fields: [
+      'p_complete_rtb', 'derate_cost_min_on_station',
+      'recommended_boost_hPa', 'point_of_no_return_s',
+    ],
   };
 
   const health: HealthFrame = {
@@ -872,6 +880,9 @@ function makeTick(
     diagnosis,
     rul,
     mission,
+    // The locally generated mission never runs a real classifier — it is
+    // always the SIMULATED source (see net/feed.ts), so this is never 'active'.
+    ml_status: { active: false, reason: 'simulated mission — no backend ML pipeline' },
     // What a THRESHOLD system would be showing. Stays green through the
     // entire injector event — which is the argument, in one field.
     limits_state:

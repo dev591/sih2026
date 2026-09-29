@@ -279,9 +279,20 @@ frontend mocks *this* message and builds the entire dashboard against it.
     "point_of_no_return_s": 9240.0        // from remaining fuel and DEGRADED bsfc
   },
 
-  "limits_state": "green"          // green | caution | exceeded — what a THRESHOLD
+  "limits_state": "green",         // green | caution | exceeded — what a THRESHOLD
                                    // system would be showing right now. Keep it on
                                    // screen: the contrast is the whole argument.
+
+  // ---- ML PIPELINE STATUS — is `diagnosis`/`anomaly`/`rul`/`theta`/`novelty`
+  // above the real M2/M3/UKF output, or main.py's ground-truth stub? The two
+  // are schema-identical, so this is the ONLY field that tells them apart.
+  // Present on every frame — never omit it, never assume `active: true`.
+  "ml_status": {
+    "active": true,                // false ⇒ every block above is the stub
+    "reason": null                 // populated when active is false: import
+                                   // failure, construction failure, or a
+                                   // per-tick ml.run() exception
+  }
 }
 ```
 

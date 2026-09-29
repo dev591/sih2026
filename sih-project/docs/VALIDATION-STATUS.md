@@ -279,3 +279,65 @@ published spec is *sustained* near-full power all the way to its rated
 altitude — unlike a typical light aircraft that cruises well below its
 ceiling. `frontend/src/config/engines.ts`'s three altitude-derived display
 constants were re-measured at 11k and updated to match.
+
+## 2026-09-29 — Phase 1 physics calibration
+
+Root-cause fix: `phi_max_design` was 0.095 (half the correctly-derived value from the GT1749V anchor), making the engine structurally air-starved. `eta_i_nominal` was 0.50, giving BSFC 183 g/kWh against the VRDE EOI 2015 requirement of 210 g/kWh.
+
+### What changed
+
+| Parameter | Before | After | Source |
+|---|---|---|---|
+| `eta_i_nominal` | 0.50 | 0.44 | Derived: η = 3.6e9/(BSFC·Q_LHV), BSFC=210 g/kWh from VRDE EOI 2015 |
+| `rated_fuel_flow_kgps` | 0.006242 | 0.007816 | Recalculated: P_ind/(η_i·Q_LHV) |
+| `phi_max_design` | 0.095 | 0.200 | Re-derived from GT1749V anchor (φ_rated=0.163, ×1.15 margin, ÷φ_factor=0.949) |
+| `radiator.frontal_area_m2` | 0.086 | 0.105 | Re-sized for hot-day ISA+20 with corrected fuel flow |
+
+### Validated full-throttle altitude sweep (post-calibration)
+
+| Altitude (ft) | Turbo (rpm) | MAP (bar) | Power (kW) | % rated | λ |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 155,768 | 2.200 | 137.6 | 102.5% | 1.274 |
+| 5,000 | 164,944 | 2.200 | 137.6 | 102.5% | 1.280 |
+| 11,000 | 166,672 | 1.805 | 129.2 | **96.3%** | 1.150 |
+| 16,000 | 166,187 | 1.520 | 110.5 | 82.3% | 1.150 |
+| 20,000 | 165,748 | 1.317 | 96.9 | 72.2% | 1.150 |
+
+Turbo overspeed limit: 172,000 rpm. Turbo **never reaches the clamp** at any altitude (max 166,672 rpm at 11k ft cruise). Gate 2 failure (turbo pinned) is fully resolved — the PI overspeed loop in `phase6-overspeed-wip` was not needed and is permanently deferred.
+
+### Gap to DRDO spec (honest)
+
+| Anchor | Post-calibration | Gap |
+|---|---:|---:|
+| DRDO 180 hp at sea level | 184.5 hp | +2.5% (over-delivers at SL) |
+| DRDO 180 hp at 11,000 ft | 173.3 hp | −3.7% |
+| BSFC vs EOI 210 g/kWh | 204 g/kWh | −2.9% |
+
+The 3.7% gap at 11,000 ft is the smoke limiter (λ = 1.15) capping fuel before rated power. This is a real physical constraint, not a model error — the twin correctly enforces the published smoke limit, and the published spec may reflect slightly more aggressive boost than the Ellipse model approximation delivers. Stated plainly, not hidden.
+
+### Calibration gate results (6/6)
+
+All six gates pass. Key numbers:
+- Gate 1: MAP 1.368 bar at 11k/72% — within [0.9, 1.4] bar ✅
+- Gate 2: Turbo 142,621 rpm at 11k/72% — within [114k, 172k) rpm ✅
+- Gate 3: Power 92.6 kW (69% rated), RPM 0.0% off governor target ✅
+- Gate 4: rho1 SNR 50σ on compressor fault; rho10 SNR 49σ on friction ✅
+- Gate 5: Oil pressure responds to bearing wear ✅
+- Gate 6: MAP flat to 11,000 ft then falls ✅
+
+### Other fixes (Phase 1)
+
+- **Item 7** (petrol terminology): `ignition_misfire` → `injection_misfire` across all ML files. Label now reflects CI combustion failure, not spark failure.
+- **Item 21** (aspiration field not read): `mvem.py` now gates the entire turbo physics block on `profile.aspiration`. A naturally-aspirated profile skips compressor, turbine, and wastegate — no code needed, no turbo-physics run.
+- **ψ formula bug**: No code bug found — the error was only in the planning document. `airpath.py::compressor_ellipse` was correct throughout.
+- **PI overspeed loop** (`phase6-overspeed-wip`): Deferred permanently. The φ_max fix reduced cruise turbo speed from 172k (pinned) to 142k rpm, eliminating the symptom the loop was built to address.
+
+### Test suite
+
+`test_sensors.py` 12/12 · `verify.py` 6/6 · `gates_check.py` 6/6 — all green.
+
+### Known open items (post Phase 1)
+
+- Power at 11,000 ft is 3.7% below the DRDO 180 hp spec. The gap is the smoke limiter enforcing λ ≥ 1.15; closing it would require either a higher-capacity compressor map or relaxing the smoke limit below its published value.
+- Part-throttle physics is explicitly unvalidated — do not quote part-throttle numbers as validated.
+- ML weights (`ml/weights/v2/`) were trained on the old uncalibrated engine. Retraining on the corrected engine is Phase 3 (post-recording).

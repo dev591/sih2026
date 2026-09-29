@@ -55,6 +55,14 @@ OPERATING_POINTS = [
     (11000, 40), (11000, 72), (11000, 100),
 ]
 
+
+def operating_points(cfg: dict) -> list[tuple[float, float]]:
+    """Sea level, mid-envelope and the engine's OWN critical altitude, at
+    idle-ish, cruise and full power — taken from the profile, not from one
+    engine's numbers."""
+    crit = float(cfg.get("ratings", {}).get("critical_altitude_ft", 11000.0))
+    return [(alt, thr) for alt in (0.0, round(crit / 2), crit) for thr in (40, 72, 100)]
+
 STEPS_TO_STEADY_STATE = 10
 SAMPLES_PER_POINT     = 30
 DT                    = 1.0
@@ -81,7 +89,7 @@ def collect_raw_rho(cfg: dict) -> np.ndarray:
     }
     samples = []
 
-    for altitude_ft, throttle_pct in OPERATING_POINTS:
+    for altitude_ft, throttle_pct in operating_points(cfg):
         atm = isa(altitude_ft, isa_offset_K=0.0)
 
         plant        = MVEM(cfg, seed=hash((altitude_ft, throttle_pct)) & 0xFFFF)
@@ -108,6 +116,36 @@ def collect_raw_rho(cfg: dict) -> np.ndarray:
         [[np.nan if v is None else v for v in row] for row in samples],
         dtype=float,
     )
+
+
+def collect_raw_extra(cfg: dict) -> np.ndarray:
+    """Healthy samples of parity.residuals.EXTRA_NAMES, same envelope and
+    seeds as collect_raw_rho so the two sigma files describe one population."""
+    from parity.residuals import compute_extra_residuals
+    n = cfg["geometry"]["cylinders"]
+    nominal_params = {
+        "cd_inj": [1.0] * n, "eta_v_scale": 1.0, "eta_c_scale": 1.0,
+        "hA_scale": 1.0, "f_fric_scale": 1.0, "oil_pump_scale": 1.0,
+        "fuel_rail_scale": 1.0, "misfire_prob": [0.0] * n,
+        "detonation_sev": [0.0] * n, "rad_eff_scale": 1.0, "cool_pump_scale": 1.0,
+    }
+    samples = []
+    for altitude_ft, throttle_pct in operating_points(cfg):
+        atm = isa(altitude_ft, isa_offset_K=0.0)
+        seed = hash((altitude_ft, throttle_pct)) & 0xFFFF
+        plant, twin = MVEM(cfg, seed=seed), MVEM(cfg, seed=999)
+        mp, mt = MeasurementModel(seed=seed), MeasurementModel(seed=999, is_twin=True)
+        for _ in range(STEPS_TO_STEADY_STATE):
+            plant.step(DT, nominal_params, atm, throttle_pct)
+            twin.step(DT, nominal_params, atm, throttle_pct)
+        for _ in range(SAMPLES_PER_POINT):
+            plant.step(DT, nominal_params, atm, throttle_pct)
+            twin.step(DT, nominal_params, atm, throttle_pct)
+            ex = compute_extra_residuals(
+                mp.measure(plant.get_outputs(), add_noise=True),
+                mt.measure(twin.get_outputs(), add_noise=False), cfg)
+            samples.append([np.nan if v is None else v for v in ex])
+    return np.array(samples, dtype=float)
 
 
 def compute_sigma(raw: np.ndarray) -> list:
@@ -408,16 +446,20 @@ def main() -> None:
         action="store_true",
         help="Generate labelled fault-run datasets in data/fault_runs/",
     )
+    parser.add_argument("--engine", default=None,
+                        help="engine profile id (default: $PRAMANA_ENGINE or vrde_180)")
     args = parser.parse_args()
 
-    cfg = load_engine_profile("engine_vrde_180.yaml")
+    from twin.profiles import DEFAULT_ENGINE, artifact_dir, engine_id
+    cfg = load_engine_profile(args.engine or DEFAULT_ENGINE)
+    eid = engine_id(cfg)
 
     # Sigma bootstrap
     raw   = collect_raw_rho(cfg)
     sigma = compute_sigma(raw)
 
-    out_dir = Path(__file__).resolve().parent.parent / "config"
-    out_dir.mkdir(exist_ok=True)
+    out_dir = artifact_dir(eid, "sigma")
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "sigma_vector.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(sigma, f, indent=2)
@@ -430,11 +472,21 @@ def main() -> None:
     ]
     print(
         f"Sampled {raw.shape[0]} healthy points across "
-        f"{len(OPERATING_POINTS)} operating points."
+        f"{len(operating_points(cfg))} operating points."
     )
     for label, s in zip(labels, sigma):
         print(f"  {label:20s}  sigma = {s:.5f}")
     print(f"\nWrote {out_path}")
+
+    from parity.residuals import extra_names
+    names = extra_names(cfg["geometry"]["cylinders"])
+    sigma_ext = compute_sigma(collect_raw_extra(cfg))
+    ext_path = out_dir / "sigma_ext.json"
+    with open(ext_path, "w", encoding="utf-8") as f:
+        json.dump({"names": names, "sigma": sigma_ext}, f, indent=2)
+    for label, s in zip(names, sigma_ext):
+        print(f"  {label:20s}  sigma = {s:.5f}")
+    print(f"Wrote {ext_path}")
 
     # Optional healthy dataset
     data_root = Path(__file__).resolve().parent.parent.parent / "data"

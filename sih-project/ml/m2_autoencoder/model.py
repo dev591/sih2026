@@ -13,7 +13,7 @@ Why LSTM, not Transformer:
 
 Why sequence model, not static autoencoder:
   • ρ₁₁ (crank ripple) is a spectral quantity that exists over a window.
-  • Harmonic content of ρ₁₁ separates injector fouling from ignition misfire
+  • Harmonic content of ρ₁₁ separates injector fouling from injection misfire
     on the same cylinder — a property of a sequence, not a sample.
 
 Threshold discipline:

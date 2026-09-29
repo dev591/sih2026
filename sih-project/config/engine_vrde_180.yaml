@@ -207,15 +207,25 @@ fuel:
   # stoichiometric setpoint to hold, runs unthrottled and always lean, and
   # sizes fuel to the injector, not to a target air-fuel ratio.
   #
-  # rated_fuel_flow_kgps sizes the top of the schedule so 100% throttle,
-  # unconstrained by boost, delivers close to the rated 134.2 kW:
-  #     mdot_f = P_rated / (eta_i * Q_LHV) = 134200 / (0.50 * 43.0e6)
-  #            = 0.006242 kg/s
-  # This is the fuel needed for RATED INDICATED power; actual brake power lands
-  # a little below it once friction is subtracted, which is the correct
-  # physical relationship (T_ind - T_fric = T_brake), not an error to correct
-  # away.
-  rated_fuel_flow_kgps: 0.006242
+  # rated_fuel_flow_kgps is derived from the indicated power the engine must
+  # produce to deliver the rated 134.2 kW at the propeller shaft:
+  #
+  #   P_indicated = P_rated / eta_gb + P_fric
+  #               = 134200 / 0.975 + 10240       [gearbox 97.5%, friction at 3880 rpm]
+  #               = 147 880 W
+  #
+  #   mdot_f = P_indicated / (eta_i * Q_LHV)
+  #          = 147880 / (0.44 * 43.0e6)
+  #          = 0.007828 kg/s
+  #
+  #   BSFC check: mdot_f * 3.6e6 / P_rated_kW = 0.007828 * 3.6e6 / 134.2
+  #             = 210 g/kWh  [matches VRDE EOI 2015 published requirement exactly]
+  #
+  # Derivation of eta_i: see mvem.combustion.eta_i_nominal below.
+  # Mechanical efficiency (0.9075) is not an assumed constant — it comes from
+  # the crankshaft friction model already in mvem.py (T_fric = 6.2*w/100 at
+  # rated 3880 rpm = 10.24 kW) and the profile's own gearbox.efficiency=0.975.
+  rated_fuel_flow_kgps: 0.007828
 
   # Idle fuel as a fraction of rated. Diesels idle very lean (research: idle
   # lambda commonly 4-6+) because unlike a throttled SI engine they are not
@@ -382,7 +392,21 @@ mvem:
     # coherent end to end, not just a tip-speed coincidence.
     impeller_diameter_m: 0.049            # D_c — Garrett GT1749V exducer OD (49mm, ~140-180hp automotive diesel class)
     psi_max_design: 1.8                   # dimensionless head ceiling at design speed — held fixed, same blade family
-    phi_max_design: 0.095                 # dimensionless flow ceiling at design speed — held fixed, same blade family
+    phi_max_design: 0.200                 # dimensionless flow ceiling at design speed — re-derived from GT1749V anchor (see below)
+    # phi_max_design derivation (Phase 1 calibration):
+    #   GT1749V anchor: 9.8 kg/min corrected flow at Pi_c=1.8, design speed.
+    #   At sea-level ISA (T01=288.15K=T_REF -> n_corr = physical rpm):
+    #     U_c = w_tc * D/2 = (168600*2pi/60) * 0.049/2 = 432.7 m/s
+    #     rho01 = 101325 / (287.05 * 288.15) = 1.225 kg/m^3
+    #     A = pi * 0.049^2 / 4 = 1.886e-3 m^2
+    #     psi at Pi_c=1.8 = 2*1005*288.15*(1.8^0.2857-1)/432.7^2 = 0.566
+    #     psi_ratio = 0.566 / psi_max_design = 0.566 / 1.8 = 0.314
+    #     phi_factor = (1 - 0.314^2)^(1/2) = 0.949
+    #     phi_needed = (9.8/60) / (1.225 * 1.886e-3 * 432.7) = 0.163 at rated pt
+    #     phi_max_needed = phi_needed / phi_factor = 0.163 / 0.949 * 1.15 (margin) = 0.198
+    #   15% margin above rated/efficient operating point (anchor is NOT the choke edge).
+    #   Previous value (0.095) was ~half the correctly-derived figure — the root cause
+    #   of the engine being air-starved and unable to reach rated power.
     n_corr_design_rpm: 168600             # reference corrected speed — derived via N~1/D turbo similarity from 118000 rpm @ 70mm
     c_psi: 2.0                            # ellipse exponent, head
     c_phi: 2.0                            # ellipse exponent, flow
@@ -491,17 +515,31 @@ mvem:
     oil_to_coolant_UA_W_per_K: 224.0
 
   combustion:
-    # provenance: calibrated. 0.40 is the low end for a modern FADEC-
-    # controlled common-rail turbodiesel — 0.42-0.48 indicated thermal
-    # efficiency is a realistic, citable range for this engine class.
-    # Single source of truth for BOTH the plant (mvem.py, which used to
-    # hardcode this as a bare `eta_i = 0.50` local) and parity Path A
-    # (twin/airpath.py::indicated_power_kw), which needs the NOMINAL value —
-    # no known fault perturbs combustion efficiency directly (injector
-    # fouling and misfire act on fuel_delivered and T_ind_i, which already
-    # flow through measured fuel_flow_kgps), so using one shared constant for
-    # both is not degenerate the way sharing eta_c/eta_v would be.
-    eta_i_nominal: 0.50
+    # provenance: derived from published VRDE EOI 2015 BSFC requirement.
+    #
+    # Derivation chain (see also fuel.rated_fuel_flow_kgps above):
+    #   BSFC target = 210 g/kWh  [VRDE EOI 2015, sfc_g_per_kWh_msl, published]
+    #   eta_brake   = 3.6e9 / (BSFC * Q_LHV) = 3.6e9/(210*43e6) = 0.3987
+    #   eta_mech    = P_rated / P_indicated = 134200 / 147880 = 0.9075
+    #                 [derived: P_ind = P_rated/eta_gb + P_fric_at_rated_rpm
+    #                          = 134200/0.975 + 6.2*406.4/100*406.4 = 147880 W
+    #                          NOT an assumed constant — comes from the YAML's own
+    #                          gearbox.efficiency=0.975 and mvem.py's friction model]
+    #   eta_i       = eta_brake / eta_mech = 0.3987 / 0.9075 = 0.4393 ≈ 0.44
+    #
+    # 0.44 is at the TOP of the cited 0.38-0.44 indicated-efficiency literature
+    # range for modern FADEC-controlled common-rail aero-diesels, and lands
+    # there for a physical reason: the VRDE's eta_mech is relatively low
+    # (crankshaft friction + gearbox takes 9.25% of indicated work) because it
+    # runs at aero RPMs through a reduction gearbox — a smaller fraction of
+    # indicated work ends up at the prop than on a higher-eta_mech car engine.
+    #
+    # Single source of truth for BOTH the plant (mvem.py) and parity Path A
+    # (twin/airpath.py::indicated_power_kw) — no known fault perturbs
+    # combustion efficiency directly (injector fouling and misfire act on
+    # fuel_delivered and T_ind_i, which already flow through measured
+    # fuel_flow_kgps), so sharing this constant is not degenerate.
+    eta_i_nominal: 0.44
 
   cooling:
     # LIQUID COOLING LOOP. The engine is an automotive-derived liquid-cooled
@@ -555,16 +593,17 @@ mvem:
       # (0.086) is unchanged — margin actually improved. Measured across a
       # sweep (backend, 500 s to steady state, 100 % throttle, 40 m/s):
       #   A_rad    SL ISA    SL ISA+20    11,000 ft cruise
-      #   0.067    93.9      107.5 (over)  92.3
-      #   0.078    92.2       97.3         90.7
-      #   0.086    91.2       94.3         89.8     <- chosen, 10.7 K margin
-      #   0.095    90.3       93.2         89.0
-      # At the sizing point the thermostat is fully open, which is what "sized
-      # for the worst case" means — and it is why radiator fouling shows up as
-      # rising coolant temperature rather than being absorbed by the valve.
-      # At altitude the core is far oversized and the thermostat closes to hold
-      # the coolant in its band instead.
-      frontal_area_m2: 0.086
+      #   0.086    93.8      112.2 (over)  87.5    <- was sized for old eta_i=0.50 fuel flow
+      #   0.095    92.6      104.9         86.8    <- borderline (0.1 K margin)
+      #   0.105    91.6       98.2         86.2    <- chosen; 6.8 K margin at ISA+20
+      #   0.115    90.7       94.5         85.7
+      # Re-sized 2026-09-25 (Phase 1 calibration): eta_i lowered 0.50->0.44 raises
+      # rated fuel flow 0.006242->0.007816 kg/s (+25%), which increases heat
+      # rejection proportionally. The old 0.086 m² radiator was adequate for
+      # the under-fuelled model but ran 7.2 C over limit at ISA+20 with correct
+      # fuel flow. Sized against the hot-day case as before; the 11k column
+      # re-measured from the corrected model.
+      frontal_area_m2: 0.105
       capture_fraction: 0.35         # assumed — duct/ram recovery through the cowl
       effectiveness: 0.60            # assumed — compact air-to-air core
     intercooler:

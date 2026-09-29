@@ -50,6 +50,7 @@ _CLAMPS: dict[str, tuple[float, float]] = {
     "ringWear": (0.6,  1.0),   # eta_v_scale lower bound
     "oilLeak":  (0.2,  1.0),   # oil_pump_scale lower bound
     "fuelFilter": (0.3, 1.0),  # fuel_rail_scale lower bound
+    "unmodelled": (0.6, 1.0),  # prop_cp_scale lower bound (blade damage)
 }
 
 
@@ -169,7 +170,14 @@ def apply_fault_config(
         elif fault_name == "lambdaSensor":
             biases["lambda"] = biases.get("lambda", 0.0) + sev
 
-        # "unmodelled" is BE-2's novelty channel — no MVEM mutation needed
+        elif fault_name == "unmodelled":
+            # The novelty test needs a REAL physical fault the classifier was
+            # never trained on. This key used to change nothing at all, so a
+            # judge picking "fault outside the library" on the live backend
+            # watched a healthy engine. Now: propeller blade damage, rate =
+            # fraction of power coefficient lost per minute.
+            lo, _ = _CLAMPS["unmodelled"]
+            params["prop_cp_scale"] = max(lo, 1.0 - sev)
 
     return params, biases, isa_out
 

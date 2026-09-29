@@ -590,6 +590,28 @@ body {
 .src-simulated { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: var(--tint-warn); }
 .src-connecting { color: var(--text-dimr); }
 
+/* ---------------- ml pipeline status badge ---------------- */
+/* `ml_status.active === false` means diagnosis is main.py's ground-truth
+   stub, not the real classifier — this must never blend in as routine. */
+.ml-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  padding: 3px 9px; border-radius: 2px; border: 1px solid var(--line-2);
+  color: var(--text-dimr);
+}
+.ml-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ml-badge-live { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: var(--tint-ok); }
+.ml-badge-live .ml-dot { box-shadow: 0 0 7px var(--ok); }
+.ml-badge-stub {
+  color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent);
+  background: var(--tint-alert); animation: ml-stub-pulse 1.6s ease-in-out infinite;
+}
+.ml-badge-stub .ml-dot { box-shadow: 0 0 7px var(--alert); }
+@keyframes ml-stub-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* ---------------- twin confidence ---------------- */
 .conf-big { font-family: var(--mono); font-size: 30px; line-height: 1; }
 .conf-unit { font-size: 14px; color: var(--text-dimr); margin-left: 2px; }

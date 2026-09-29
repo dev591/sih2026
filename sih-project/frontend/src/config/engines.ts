@@ -170,9 +170,9 @@ export const VRDE_180: EngineProfile = {
   // from backend verify.py at the new point, not hand-adjusted.
   cruiseAltitude_ft: 11000,
   cruiseTas_mps: 61.2,
-  cruiseBladeAngle_deg: 25.1,   // backend verify.py, 11,000 ft / 72 % steady state
-  nominalGearboxOil_C: 95.8,    // same run
-  nominalCoolant_C: 86.4,       // backend, 11,000 ft / 72 %, thermostat ~43 % open
+  cruiseBladeAngle_deg: 25.5,   // backend verify.py, 11,000 ft / 72 % steady state
+  nominalGearboxOil_C: 96.5,    // same run
+  nominalCoolant_C: 86.2,       // backend, 11,000 ft / 72 %, thermostat ~41 % open
 };
 
 // ---------------------------------------------------------------------------

@@ -261,6 +261,16 @@ export function DiagnosisPanel() {
 export function HealthParamsPanel() {
   const { theta } = useCurrentTick().health;
 
+  if (!theta) {
+    return (
+      <Panel title="Health parameters" subtitle="UKF joint state–parameter estimate">
+        <div className="param-list">
+          <div className="param"><span className="param-label" style={{opacity:0.5}}>UKF unavailable — ML pipeline not loaded</span></div>
+        </div>
+      </Panel>
+    );
+  }
+
   const rows: { label: string; v: number; s: number }[] = [
     { label: 'Volumetric efficiency scale  η_v', v: theta.eta_v_scale.value, s: theta.eta_v_scale.sigma },
     { label: 'Compressor efficiency scale  η_c', v: theta.eta_c_scale.value, s: theta.eta_c_scale.sigma },
@@ -386,9 +396,15 @@ export function MissionPanel() {
         <Metric label="Power ceiling" value={mission.recommended_power_pct.toFixed(0)} unit="%" />
       </div>
       <Note>
-        Point of no return computed from remaining fuel and the <em>degraded</em>
-        BSFC, not the book figure. Reliability advice that ignores mission value
-        is ignored advice.
+        Point of no return integrates the twin's own live fuel flow against
+        a mission fuel budget — a fouled injector or a degrading turbo burns
+        it down faster in real time, not the book figure. Boost ceiling is
+        the FADEC's own wastegate target at the recommended power level.
+        {mission.assumed_fields.length > 0 && (
+          <> {mission.assumed_fields.includes('derate_cost_min_on_station')
+            ? 'Derate cost is still an engineering estimate — no distance/speed-vs-power model exists yet to derive it.'
+            : `${mission.assumed_fields.join(', ')} still engineering estimates.`}</>
+        )}
       </Note>
     </Panel>
   );

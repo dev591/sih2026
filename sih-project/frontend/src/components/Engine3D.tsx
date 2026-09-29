@@ -304,7 +304,7 @@ function Scene() {
         />
         <Turbocharger
           rpm={tick.slow.turbo_rpm}
-          effScale={tick.health.theta.eta_c_scale.value}
+          effScale={tick.health.theta?.eta_c_scale?.value ?? 1.0}
           count={N_CYL}
         />
         <GearboxNose count={N_CYL} crankAngle={crankAngle} />

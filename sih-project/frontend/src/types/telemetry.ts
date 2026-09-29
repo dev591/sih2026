@@ -211,6 +211,10 @@ export interface MissionDecision {
   recommended_power_pct: number;
   recommended_boost_hPa: number;
   point_of_no_return_s: number;   // from remaining fuel and DEGRADED bsfc
+  /** Keys of THIS interface that are still fixed engineering estimates, not
+   *  computed this tick (see backend/main.py's MISSION_FUEL_KG comment for
+   *  why point_of_no_return_s and p_complete_rtb are NOT in this list). */
+  assumed_fields: string[];
 }
 
 export type LimitsState = 'green' | 'caution' | 'exceeded';
@@ -236,12 +240,22 @@ export interface TwinConfidence {
   note: string;
 }
 
+/** Whether `diagnosis`/`anomaly`/`rul`/`theta`/`novelty` on THIS frame came
+ *  from the real M2/M3/UKF classifier (`active: true`) or from the
+ *  ground-truth stub in `main.py::_diagnosis()` (`active: false`). The stub
+ *  is schema-identical to a real diagnosis — this is the only field that
+ *  tells them apart, so it must be checked and surfaced, never assumed. */
+export interface MlStatus {
+  active: boolean;
+  reason: string | null;
+}
+
 export interface HealthFrame {
   schema: 'pramana.health.v1';
   t: number;
   engine_id: 'A' | 'B';
   rho: ResidualVector;
-  theta: HealthParams;
+  theta: HealthParams | null;   // null when ML pipeline unavailable (physics-only mode)
   virtual: VirtualSensors;
   anomaly: AnomalyState;
   diagnosis: Diagnosis;
@@ -249,6 +263,7 @@ export interface HealthFrame {
   mission: MissionDecision;
   novelty?: NoveltyState;
   twin_confidence?: TwinConfidence;
+  ml_status: MlStatus;
   /** What a THRESHOLD system would be showing right now. Keep it on screen:
    *  the contrast is the whole argument. */
   limits_state: LimitsState;

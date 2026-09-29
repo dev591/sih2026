@@ -98,6 +98,48 @@ class M3ClassifierModel(nn.Module):
         return self.classifier(self.encoder(x))   # (B, n_classes) logits
 
 
+# ── M3 v2 — trained on engine-model data ──────────────────────────────────
+
+def compress(x: torch.Tensor) -> torch.Tensor:
+    """sign(x)·log1p(|x|): keeps a 0.3σ healthy wobble and a 300σ fault on one
+    usable scale WITHOUT discarding magnitude. The v1 encoder divided every
+    window by its own norm, which threw severity away entirely and blew
+    healthy noise up to the same size as a real fault."""
+    return torch.sign(x) * torch.log1p(x.abs())
+
+
+class M3v2(nn.Module):
+    """
+    1D-CNN over a (T, F) window of baseline-subtracted residual features
+    (ml/features.py), with two heads:
+      * class logits over `classes` (healthy + every modelled fault)
+      * per-class severity as a fraction of that fault's modelled range —
+        read only for the predicted class; it feeds ml/prognostics.py.
+    """
+
+    def __init__(self, n_features: int, n_classes: int):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(n_features, 64, kernel_size=5, padding=2),
+            nn.BatchNorm1d(64), nn.ReLU(),
+            nn.Conv1d(64, 96, kernel_size=5, padding=2),
+            nn.BatchNorm1d(96), nn.ReLU(),
+            nn.Conv1d(96, 96, kernel_size=3, padding=1),
+            nn.BatchNorm1d(96), nn.ReLU(),
+        )
+        # Mean AND last-step pooling: the mean carries the window's level, the
+        # last step what the engine is doing now, and their difference the
+        # trend — which is what separates a drifting probe from a warming head.
+        self.trunk = nn.Sequential(nn.Linear(96 * 2, 128), nn.ReLU(), nn.Dropout(0.2))
+        self.cls = nn.Linear(128, n_classes)
+        self.sev = nn.Linear(128, n_classes)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        h = self.conv(compress(x).permute(0, 2, 1))          # (B, C, T)
+        z = self.trunk(torch.cat([h.mean(2), h[:, :, -1]], dim=1))
+        return self.cls(z), F.softplus(self.sev(z))
+
+
 # ── Incidence-matrix cosine match (zero-training-cost) ───────────────────
 
 def _build_incidence_matrix() -> np.ndarray:

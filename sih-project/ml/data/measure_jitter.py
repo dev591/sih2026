@@ -36,7 +36,7 @@ import numpy as np
 _ROOT = Path(__file__).resolve().parent.parent.parent      # sih-project/
 sys.path.insert(0, str(_ROOT / "backend"))                 # twin/, parity/
 
-from twin.profiles import load_engine_profile               # noqa: E402
+from twin.profiles import load_engine_profile, DEFAULT_ENGINE  # noqa: E402
 from twin.atmosphere import isa                             # noqa: E402
 from twin.mvem import MVEM                                  # noqa: E402
 from twin.measurement import MeasurementModel               # noqa: E402
@@ -58,7 +58,7 @@ FAULT_HOOKS: dict[str, dict] = {
     "cht_sensor_drift":    {"kind": "sensor", "key": "cht_C",        "sign": +1, "per_cyl": True},
     "egt_sensor_drift":    {"kind": "sensor", "key": "egt_C",        "sign": +1, "per_cyl": True},
     # No hook in the current MVEM — cannot be measured, must not be guessed:
-    #   oil_pump_wear, detonation, fuel_filter_clog, ignition_misfire,
+    #   oil_pump_wear, detonation, fuel_filter_clog, injection_misfire,
     #   map_sensor_drift, lambda_sensor_drift
 }
 
@@ -146,7 +146,7 @@ def _jitter(measured: np.ndarray, column: np.ndarray) -> float | None:
 
 
 def main() -> None:
-    cfg = load_engine_profile("engine_vrde_180.yaml")
+    cfg = load_engine_profile(DEFAULT_ENGINE)
     n_cyl = cfg["geometry"]["cylinders"]
     sigma = _sigma_vector(n_cyl)
 

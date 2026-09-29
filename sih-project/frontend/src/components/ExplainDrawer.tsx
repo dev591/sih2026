@@ -149,7 +149,7 @@ export function ExplainDrawer() {
               <div><span>twin says</span><strong>{tick.predicted.egt_C[selected].toFixed(0)} °C</strong></div>
               <div><span>CHT</span><strong>{tick.slow.cht_C[selected].toFixed(1)} °C</strong></div>
               <div><span>twin says</span><strong>{tick.predicted.cht_C[selected].toFixed(1)} °C</strong></div>
-              <div><span>C_d inj</span><strong>{tick.health.theta.cd_inj.value[selected].toFixed(3)}</strong></div>
+              <div><span>C_d inj</span><strong>{(tick.health.theta?.cd_inj?.value?.[selected] ?? 1.0).toFixed(3)}</strong></div>
               <div><span>comb. η</span><strong>{(tick.health.virtual.comb_efficiency[selected] * 100).toFixed(1)} %</strong></div>
             </div>
           </>

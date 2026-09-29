@@ -100,26 +100,58 @@ class MVEM:
         self._ve_c2 = ve['correlation_c2']
         self._ve_c3 = ve['correlation_c3']
 
+        # --- Aspiration — determines whether turbo physics run at all -------
+        # Item #21: aspiration field was read in profiles.py but never used
+        # here, so every engine ran turbo physics regardless of profile.
+        # A naturally-aspirated engine has no compressor, turbine or wastegate.
+        # Profiles with no 'aspiration' key default to 'turbocharged' so
+        # existing profiles are bit-identical (no behaviour change for them).
+        self._turbocharged = (
+            self.cfg.get("profile", {}).get("aspiration", "turbocharged")
+            != "naturally_aspirated"
+        )
+
         # --- Ellipse compressor model — PRAMANA-DIRECTIVE §1.2 -------------
-        comp = mvem_cfg['compressor']
-        self.D_c = comp['impeller_diameter_m']
-        self._psi_max_design = comp['psi_max_design']
-        self._phi_max_design = comp['phi_max_design']
-        self._n_corr_design = comp['n_corr_design_rpm']
-        self._c_psi = comp['c_psi']
-        self._c_phi = comp['c_phi']
-        self._psi_speed_exp = comp['psi_speed_exponent']
-        self._phi_speed_exp = comp['phi_speed_exponent']
-        self.eta_c_max = comp['efficiency_nominal']
-        self.J_tc = comp['inertia_kgm2']
-        self.eta_m_tc = comp['mech_efficiency']
+        # Only loaded when the profile is turbocharged; a naturally-aspirated
+        # profile may omit the entire mvem.compressor block.
+        comp = mvem_cfg.get('compressor', {}) if self._turbocharged else {}
+        if self._turbocharged:
+            self.D_c = comp['impeller_diameter_m']
+            self._psi_max_design = comp['psi_max_design']
+            self._phi_max_design = comp['phi_max_design']
+            self._n_corr_design = comp['n_corr_design_rpm']
+            self._c_psi = comp['c_psi']
+            self._c_phi = comp['c_phi']
+            self._psi_speed_exp = comp['psi_speed_exponent']
+            self._phi_speed_exp = comp['phi_speed_exponent']
+            self.eta_c_max = comp['efficiency_nominal']
+            self.J_tc = comp['inertia_kgm2']
+            self.eta_m_tc = comp['mech_efficiency']
+        else:
+            # Naturally-aspirated placeholders — safe defaults so get_outputs()
+            # returns consistent schema regardless of aspiration.
+            self.D_c = 0.0
+            self._psi_max_design = 0.0
+            self._phi_max_design = 0.0
+            self._n_corr_design = 1.0
+            self._c_psi = self._c_phi = 2.0
+            self._psi_speed_exp = self._phi_speed_exp = 1.0
+            self.eta_c_max = 0.0
+            self.J_tc = 1e-6   # near-zero — turbo shaft state won't be used
+            self.eta_m_tc = 1.0
 
         # --- Turbine, decoupled from the intake side — §1.3 ----------------
-        turb = mvem_cfg['turbine']
-        self.eta_t = turb['efficiency_nominal']
-        self._turb_pr_gain = turb['pressure_ratio_gain']
-        self._mdot_ex_design = turb['mdot_ex_design_kgps']
-        self._pi_t_max = turb.get('pressure_ratio_max', 3.2)
+        turb = mvem_cfg.get('turbine', {}) if self._turbocharged else {}
+        if self._turbocharged:
+            self.eta_t = turb['efficiency_nominal']
+            self._turb_pr_gain = turb['pressure_ratio_gain']
+            self._mdot_ex_design = turb['mdot_ex_design_kgps']
+            self._pi_t_max = turb.get('pressure_ratio_max', 3.2)
+        else:
+            self.eta_t = 0.0
+            self._turb_pr_gain = 0.0
+            self._mdot_ex_design = 1.0
+            self._pi_t_max = 1.0
 
         # --- Wastegate — NOT in the directive's equations, added because
         # they need it to work. §1.2/§1.3 give the compressor and turbine
@@ -153,6 +185,22 @@ class MVEM:
         self._wastegate_gain = wg.get('proportional_gain_per_bar', 14.0)
         t_i = wg.get('integral_time_s')
         self._wastegate_ki = (self._wastegate_gain / t_i) if t_i else 0.0
+
+        # Overspeed-protection ramp. 2026-09-19 finding: at 11,000 ft/100%
+        # throttle, unclamped, the compressor's own Pi_c/n_corr map needs
+        # 241,439 rpm to hit the rated 2.2 bar MAP target — 40% over the
+        # sourced 172,000 rpm containment limit for this turbo class (see
+        # docs/VALIDATION-STATUS.md). That is not a calibration error to fit
+        # away; every real turbocharged engine hits this and the wastegate
+        # is exactly the mechanism that resolves it, by opening further than
+        # MAP-tracking alone would call for and accepting under-boost rather
+        # than letting the shaft pass its mechanical limit. Ramp starts
+        # below the hard clamp (not AT it) so the shaft is decelerating
+        # before it ever reaches the E_tc_max backstop, which stays as a
+        # last-resort clip, not the primary control.
+        self._n_max_shaft_rpm = comp.get('max_shaft_rpm', 130000.0)
+        self._overspeed_ramp_start_rpm = wg.get(
+            'overspeed_ramp_start_frac', 0.95) * self._n_max_shaft_rpm
         self._wg_int = 0.0
 
         # --- Propeller load — §1.5, now through a reduction gearbox and, where
@@ -252,6 +300,7 @@ class MVEM:
         self.m_c = 0.0
         self.fuel_cmd = 0.0
         self.fuel_delivered = np.zeros(self.N_cyl)
+        self.fuel_burned = np.zeros(self.N_cyl)
         self.T_egt = np.full(self.N_cyl, 288.15)
         self.lambda_val = 1.0
         self.ripple = 0.0
@@ -320,6 +369,11 @@ class MVEM:
         fuel_rail_scale = params.get('fuel_rail_scale', 1.0)
         misfire_prob = params.get('misfire_prob', [0.0] * self.N_cyl)
         detonation_sev = params.get('detonation_sev', [0.0] * self.N_cyl)
+        # Propeller blade damage (erosion, a bird strike, a delaminated tip)
+        # scales the blade's power coefficient. Deliberately NOT in the fault
+        # library the classifier is trained on — it is the physical 'fault
+        # outside the library' for the novelty test.
+        prop_cp_scale = params.get('prop_cp_scale', 1.0)
 
         p_atm = atm['p']
         T_atm = atm['T']
@@ -412,19 +466,30 @@ class MVEM:
             eta_i = self._eta_i
             T_ind_i = eta_i * self.fuel_delivered * self.Q_LHV / max(self.w, 1.0)
             
-            # Apply misfire and detonation (discrete/cycle-level)
+            # Apply misfire and detonation (discrete/cycle-level).
+            # A compression-ignition misfire is fuel that is INJECTED but does
+            # not burn: the metered flow is unchanged, only its combustion is
+            # lost. Zeroing fuel_delivered instead made a misfire physically
+            # identical to a blocked injector (measured signature cosine 0.998),
+            # erasing the one observable that separates them — the flow meter
+            # still counts a misfiring cylinder's fuel, it does not count fuel a
+            # fouled injector never delivered.
             Q_gas_mult = np.ones(self.N_cyl)
+            burned = self.fuel_delivered.copy()
             for cyl in range(self.N_cyl):
                 if self.rng.random() < misfire_prob[cyl]:
-                    self.fuel_delivered[cyl] = 0.0
+                    burned[cyl] = 0.0
                     T_ind_i[cyl] = 0.0
                 else:
                     k_sev = detonation_sev[cyl]
                     if k_sev > 0.0 and self.rng.random() < k_sev * 0.3:
                         T_ind_i[cyl] *= (1.0 - k_sev * 0.4)
                         Q_gas_mult[cyl] = (1.0 + k_sev * 0.8)
+            self.fuel_burned = burned
 
-            m_f_total = np.sum(self.fuel_delivered) # Recompute after misfires
+            m_f_total = np.sum(self.fuel_delivered)
+            # The UEGO sees oxygen that unburned fuel did not consume.
+            self.lambda_val = self.m_a / (self.AFR_st * max(np.sum(burned), 1e-6))
             T_ind = np.sum(T_ind_i)
 
             T_fric = 6.2 * f_fric_scale * self.w / 100.0
@@ -440,9 +505,9 @@ class MVEM:
             J = tas / (n_prop_rps * self.D_prop)
             if self._constant_speed:
                 self._govern(n_prop_rps, throttle_frac, h)
-                Cp = propeller_cp(self._prop, J, self.beta_deg)
+                Cp = propeller_cp(self._prop, J, self.beta_deg) * prop_cp_scale
             else:
-                Cp = propeller_cp(self._prop, J)
+                Cp = propeller_cp(self._prop, J) * prop_cp_scale
             rho_air = p_atm / (self.R * max(T_atm, 1.0))
             P_prop = Cp * rho_air * n_prop_rps ** 3 * self.D_prop ** 5
             self.P_prop_last = P_prop
@@ -475,7 +540,7 @@ class MVEM:
                 / self._oil_thermal_mass_J
 
             # 4. Cylinder Head Thermal
-            Q_gas_i = 0.15 * self.fuel_delivered * self.Q_LHV * Q_gas_mult
+            Q_gas_i = 0.15 * self.fuel_burned * self.Q_LHV * Q_gas_mult
             if self._liquid_cooling:
                 # Conductance follows coolant flow (pump is speed-driven) as
                 # Re^0.8 — Dittus-Boelter. hA_scale remains the UKF's health
@@ -490,7 +555,7 @@ class MVEM:
                 q_head_i = h_air * self.A_fin * (self.T_cht - self.T_cool)
                 dT_cht_dt = (Q_gas_i - q_head_i) / (self.m_cht * self.cp_cht)
 
-            Q_ex_i = self.fuel_delivered * self.Q_LHV - T_ind_i * self.w - Q_gas_i
+            Q_ex_i = self.fuel_burned * self.Q_LHV - T_ind_i * self.w - Q_gas_i
             m_ex_i = (self.m_a / self.N_cyl) + self.fuel_delivered
             self.T_egt = T_atm + Q_ex_i / (m_ex_i * self.cp_ex)
 
@@ -509,26 +574,34 @@ class MVEM:
             # predicted rho1 = -2 (strong negative) for turbo degradation, so
             # the signature table was right and the simulator was wrong.
             #
-            # Coupled rather than made an independent parameter: fouling does
-            # both at once, and a free extra degree of freedom would need a
-            # matching state in the UKF's theta vector to be identifiable.
-            flow_ratio = self.cfg['mvem']['compressor'].get(
-                'flow_capacity_loss_ratio', 0.0)
-            phi_c_scale = 1.0 - flow_ratio * (1.0 - eta_c_scale)
-            phi_c_scale = float(np.clip(phi_c_scale, 0.3, 1.0))
-            # Compressor outlet pressure = manifold pressure plus the
-            # intercooler core's drop (flow-squared). Pi_c is the COMPRESSOR's
-            # pressure ratio, so it is taken here and not at the manifold.
-            if self._liquid_cooling:
-                flow_ratio_ic = max(self.m_a, 0.0) / max(self._mdot_rated, 1e-6)
-                self.p_comp_out = self.p_im + self._ic_dp_rated_pa * flow_ratio_ic ** 2
+            # 5. Turbocharger — only runs on a turbocharged profile.
+            # A naturally-aspirated profile sets p_comp_out = p_im (ambient),
+            # m_c = m_a (induction already computed above), and skips the
+            # shaft energy balance entirely.
+            if not self._turbocharged:
+                self.p_comp_out = p_atm
+                self.m_c = self.m_a
+                self.eta_c_last = 0.0
+                self.pi_t_last = 1.0
             else:
-                self.p_comp_out = self.p_im
+                # FLOW-CAPACITY LOSS RATIO — coupled to the efficiency loss.
+                flow_ratio = self.cfg['mvem']['compressor'].get(
+                    'flow_capacity_loss_ratio', 0.0)
+                phi_c_scale = 1.0 - flow_ratio * (1.0 - eta_c_scale)
+                phi_c_scale = float(np.clip(phi_c_scale, 0.3, 1.0))
+                # Compressor outlet pressure = manifold pressure plus the
+                # intercooler core's drop (flow-squared). Pi_c is the COMPRESSOR's
+                # pressure ratio, so it is taken here and not at the manifold.
+                if self._liquid_cooling:
+                    flow_ratio_ic = max(self.m_a, 0.0) / max(self._mdot_rated, 1e-6)
+                    self.p_comp_out = self.p_im + self._ic_dp_rated_pa * flow_ratio_ic ** 2
+                else:
+                    self.p_comp_out = self.p_im
             Pi_c = self.p_comp_out / p_atm  # NO clamp to >=1 — §1.3: Pi_c<1 is
                                        # a legitimate restriction/choke state,
                                        # not an error condition.
 
-            for _ in range(TURB_SUBSTEPS):
+            for _ in range(TURB_SUBSTEPS if self._turbocharged else 0):
                 w_tc_now = self.w_tc
                 mdot_c_raw, eta_c_map = self._compressor_ellipse(
                     w_tc_now, Pi_c, p_atm, T_atm, phi_c_scale)
@@ -569,11 +642,26 @@ class MVEM:
                 wg_err = p_im_bar_now - target_map_bar
                 wg_int = self._wg_int + wg_err * h_tc
                 bypass_cmd = self._wastegate_gain * wg_err + self._wastegate_ki * wg_int
-                bypass_frac = float(np.clip(bypass_cmd, 0.0, 0.95))
+                bypass_frac_map = float(np.clip(bypass_cmd, 0.0, 0.95))
+
+                # Overspeed protection: a second, independent bypass demand
+                # driven by shaft speed rather than MAP, ramping in below the
+                # hard E_tc_max clamp. Whichever term calls for MORE bypass
+                # wins — the wastegate always takes the more restrictive of
+                # "hold MAP" and "protect the shaft", so it under-boosts
+                # rather than lets the turbo pass its mechanical limit.
+                n_tc_now_rpm = w_tc_now * 60.0 / (2.0 * np.pi)
+                ramp_span = self._n_max_shaft_rpm - self._overspeed_ramp_start_rpm
+                overspeed_term = (n_tc_now_rpm - self._overspeed_ramp_start_rpm) / max(ramp_span, 1.0)
+                bypass_frac_overspeed = float(np.clip(overspeed_term, 0.0, 1.0)) * 0.95
+
+                bypass_frac = max(bypass_frac_map, bypass_frac_overspeed)
                 # Conditional integration: hold the integrator while the valve
-                # sits on an end stop (e.g. fully shut above critical altitude),
-                # so it cannot wind up and overshoot on the way back.
-                if 0.0 < bypass_cmd < 0.95:
+                # sits on an end stop (e.g. fully shut above critical altitude)
+                # OR while the overspeed term is the active constraint, so it
+                # cannot wind up on an error the MAP loop isn't actually
+                # allowed to correct right now.
+                if 0.0 < bypass_cmd < 0.95 and bypass_frac_overspeed <= bypass_frac_map:
                     self._wg_int = wg_int
 
                 # Turbine expansion ratio comes from the EXHAUST side, via a
@@ -606,8 +694,12 @@ class MVEM:
 
             # 1. Intake manifold, now through the charge-air cooler.
             # Compressor DELIVERY temperature first...
-            self.T_comp_out = T_atm + (T_atm / max(self.eta_c_last, 1e-3)) * \
-                (max(Pi_c, 1e-3) ** ((self.gamma - 1) / self.gamma) - 1.0)
+            # For a naturally-aspirated engine, T_comp_out = T_amb (no compression).
+            if self._turbocharged:
+                self.T_comp_out = T_atm + (T_atm / max(self.eta_c_last, 1e-3)) * \
+                    (max(Pi_c, 1e-3) ** ((self.gamma - 1) / self.gamma) - 1.0)
+            else:
+                self.T_comp_out = T_atm
             if self._liquid_cooling:
                 # ...then the intercooler removes `effectiveness` of the
                 # available temperature rise above ambient. IAT is therefore

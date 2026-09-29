@@ -70,6 +70,32 @@ function SourceBadge() {
   );
 }
 
+/** Loud, not silent: `health.ml_status.active === false` means the diagnosis
+ *  on screen is `main.py::_diagnosis()`'s ground-truth stub, not the real
+ *  M2/M3 classifier — schema-identical to a real diagnosis, so this badge is
+ *  the only thing that tells them apart. Must never be quietly absent. */
+function MlStatusBadge() {
+  const tick = useCurrentTick();
+  const status = tick.health.ml_status;
+  if (status.active) {
+    return (
+      <span className="ml-badge ml-badge-live" title="diagnosis is the real M2/M3 classifier output">
+        <span className="ml-dot" />
+        ML LIVE
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-badge ml-badge-stub"
+      title={`Diagnosis is a GROUND-TRUTH STUB, not a real classifier — ${status.reason ?? 'ML pipeline unavailable'}`}
+    >
+      <span className="ml-dot" />
+      ML FALLBACK · STUB DIAGNOSIS
+    </span>
+  );
+}
+
 function StatusBar() {
   const tick = useCurrentTick();
   const { slow, health } = tick;
@@ -84,9 +110,9 @@ function StatusBar() {
       <span className="ribbon-item">{slow.map_hPa.toFixed(0)} <em>hPa</em></span>
       <span className="ribbon-item">{(slow.fuel_flow_kgps * 3600).toFixed(1)} <em>kg/h</em></span>
       <span className="ribbon-item">λ {slow.lambda.toFixed(2)}</span>
-      <span className="ribbon-item">{slow.bus_voltage_V.toFixed(1)} <em>V</em></span>
-      <span className="ribbon-item">{slow.alternator_A.toFixed(1)} <em>A</em></span>
-      <span className="ribbon-item">inj {slow.inj_timing_deg.toFixed(1)}<em>°</em></span>
+      <span className="ribbon-item">{slow.bus_voltage_V != null ? `${slow.bus_voltage_V.toFixed(1)} ` : '— '}<em>V</em></span>
+      <span className="ribbon-item">{slow.alternator_A != null ? `${slow.alternator_A.toFixed(1)} ` : '— '}<em>A</em></span>
+      <span className="ribbon-item">inj {slow.inj_timing_deg != null ? `${slow.inj_timing_deg.toFixed(1)}` : '—'}<em>°</em></span>
       <span className="ribbon-spacer" />
       <span className="ribbon-status">
         {alerting
@@ -245,6 +271,7 @@ export default function App() {
         <div className="brand-right">
           <EngineSelector />
           <SourceBadge />
+          <MlStatusBadge />
           <ReportButton />
           <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
