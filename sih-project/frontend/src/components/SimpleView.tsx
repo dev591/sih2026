@@ -26,7 +26,8 @@ import { FaultConsole } from './FaultConsole';
 import { MissionMap } from './MissionMap';
 import { EdgeDrawer, EdgeTab } from './EdgeDrawer';
 import { useCurrentTick, useMission } from '../state/missionStore';
-import { FAULT_LABELS, residualRow } from '../types/telemetry';
+import { FAULT_LABELS, residualRow, type RulEstimate } from '../types/telemetry';
+import { useEpisode, mmss } from '../state/episode';
 
 /**
  * Plain-English name for each of the 11 parity residuals, in the same order
@@ -84,6 +85,33 @@ function VerdictCard() {
       </div>
     );
   }
+  const limitsTone =
+    limits_state === 'green' ? 'ok' : limits_state === 'caution' ? 'warn' : 'alert';
+  const limitsWord =
+    limits_state === 'green' ? 'ALL GREEN'
+      : limits_state === 'caution' ? 'CAUTION'
+      : 'EXCEEDED';
+
+  // ML layer offline: the backend sends a placeholder top-1 it explicitly
+  // marks unavailable. Printing its label would be a diagnosis nobody made.
+  if (diagnosis.unavailable) {
+    return (
+      <div className="verdict verdict-idle">
+        <div className="verdict-half">
+          <span className="verdict-cap">Thresholds</span>
+          <span className={`verdict-limits tone-${limitsTone}`}>{limitsWord}</span>
+          <span className="verdict-note">what a conventional system sees</span>
+        </div>
+        <div className="verdict-rule" aria-hidden="true" />
+        <div className="verdict-half verdict-half-main">
+          <span className="verdict-cap">The twin</span>
+          <span className="verdict-fault tone-dim">Diagnosis unavailable</span>
+          <span className="verdict-note">ML layer offline — residuals still live</span>
+        </div>
+      </div>
+    );
+  }
+
   const top = diagnosis.top[0];
   const healthy = top.fault === 'healthy';
   const tone = healthy ? 'ok' : diagnosis.is_sensor_fault ? 'sensor' : 'alert';
@@ -94,13 +122,6 @@ function VerdictCard() {
   // opposite of what that beat is demonstrating. Surface the unexplained
   // fraction here so refusing to guess is visible without opening a panel.
   const unexplained = novelty?.exceeded ? novelty.index : 0;
-
-  const limitsTone =
-    limits_state === 'green' ? 'ok' : limits_state === 'caution' ? 'warn' : 'alert';
-  const limitsWord =
-    limits_state === 'green' ? 'ALL GREEN'
-      : limits_state === 'caution' ? 'CAUTION'
-      : 'EXCEEDED';
 
   return (
     <div className={`verdict verdict-${tone}`}>
@@ -135,7 +156,46 @@ function VerdictCard() {
           </span>
         )}
       </div>
+
+      {!healthy && <EarlyWarning rul={health.rul} />}
     </div>
+  );
+}
+
+/**
+ * The third column: what the twin's head start is worth. For a component
+ * fault that is time ahead of every threshold alarm plus the estimated time
+ * before it needs attention; for a sensor fault it is the false alarm, or the
+ * needless abort, that did not happen.
+ */
+function EarlyWarning({ rul }: { rul: RulEstimate }) {
+  const ep = useEpisode();
+  if (!ep) return null;
+  return (
+    <>
+      <div className="verdict-rule" aria-hidden="true" />
+      <div className="verdict-half verdict-half-warn">
+        <span className="verdict-cap">Early warning</span>
+        {ep.isSensor ? (
+          <>
+            <span className="verdict-lead tone-sensor">False alarm avoided</span>
+            <span className="verdict-note">the engine is fine; a threshold system would trust this sensor</span>
+          </>
+        ) : (
+          <>
+            <span className="verdict-lead tone-alert">
+              {ep.limitsTripped ? '' : '+'}{mmss(ep.aheadS)}
+              <em>{ep.limitsTripped ? 'before the first limit tripped' : 'ahead of every limit alarm'}</em>
+            </span>
+            <span className="verdict-note">
+              {rul.component !== 'none' && rul.reported_h != null && rul.p10_h != null && rul.p90_h != null
+                ? `about ${fmtDur(rul.reported_h)} before the first redline (${fmtDur(rul.p10_h)} to ${fmtDur(rul.p90_h)})`
+                : `detected at ${mmss(ep.detectedT)} into the flight`}
+            </span>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -147,12 +207,18 @@ function VerdictCard() {
  * anything to them. Everything below stays available — nothing is removed,
  * it's just not the first thing they see.
  */
+/** Hours → "1.4 h" or, below an hour, "23 min" (demo fault rates are fast). */
+function fmtDur(h: number): string {
+  return h < 1 ? `${(h * 60).toFixed(0)} min` : `${h.toFixed(1)} h`;
+}
+
 export function MissionSummary() {
   const { health } = useCurrentTick();
   const { diagnosis, mission, rul, rho } = health;
   const top = diagnosis.top[0];
+  const unavailable = !!diagnosis.unavailable;
   const healthy = top.fault === 'healthy';
-  const problemTone = healthy ? 'ok' : diagnosis.is_sensor_fault ? 'sensor' : 'alert';
+  const problemTone = unavailable ? 'dim' : healthy ? 'ok' : diagnosis.is_sensor_fault ? 'sensor' : 'alert';
 
   // The evidence chain, in plain English: which real measurements moved,
   // by how much, and what that combination implies. This is the same
@@ -169,7 +235,7 @@ export function MissionSummary() {
 
   const recLabel =
     mission.recommended === 'continue' ? 'Continue as planned'
-      : mission.recommended === 'derate' ? `Reduce power to ${mission.recommended_power_pct.toFixed(0)}%`
+      : mission.recommended === 'derate' ? `Reduce power to ${(mission.recommended_power_pct ?? 78).toFixed(0)}%`
       : 'Return to base';
   const recP =
     mission.recommended === 'continue' ? mission.p_complete_continue
@@ -182,10 +248,10 @@ export function MissionSummary() {
       <div className="mission-summary-row">
         <span className="mission-summary-label">Problem</span>
         <span className={`mission-summary-value tone-${problemTone}`}>
-          {healthy ? 'None — engine is healthy' : FAULT_LABELS[top.fault]}
-          {top.cylinder != null && <span className="mission-summary-cyl"> · cylinder {top.cylinder + 1}</span>}
+          {unavailable ? 'Unknown — ML layer offline' : healthy ? 'None — engine is healthy' : FAULT_LABELS[top.fault]}
+          {!unavailable && top.cylinder != null && <span className="mission-summary-cyl"> · cylinder {top.cylinder + 1}</span>}
         </span>
-        {!healthy && (
+        {!healthy && !unavailable && (
           <span className="mission-summary-note">
             {diagnosis.is_sensor_fault
               ? "It's a faulty sensor, not the engine — safe to keep flying."
@@ -224,14 +290,14 @@ export function MissionSummary() {
         <span className="mission-summary-label">Recommendation</span>
         <span className={`mission-summary-value tone-${recTone}`}>{recLabel}</span>
         <span className="mission-summary-note">
-          {(recP * 100).toFixed(0)}% chance of completing the mission this way
+          {recP == null ? 'no estimate — ML layer offline' : `${(recP * 100).toFixed(0)}% chance of completing the mission this way`}
         </span>
       </div>
 
       {!healthy && rul.component !== 'none' && (
         <div className="mission-summary-row">
           <span className="mission-summary-label">Time before this needs attention</span>
-          <span className="mission-summary-value">{rul.reported_h.toFixed(1)} hours</span>
+          <span className="mission-summary-value">{rul.reported_h == null ? 'no redline predicted yet' : fmtDur(rul.reported_h)}</span>
         </div>
       )}
     </div>

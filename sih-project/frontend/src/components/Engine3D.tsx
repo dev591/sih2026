@@ -1,404 +1,309 @@
 /**
  * PRAMANA — the interactive 3D engine twin.
  *
- * Composed entirely from named primitives (see engine/parts.tsx). Crank,
- * pistons, compressor wheel and prop flange all animate at scaled RPM; orbit,
- * zoom, and click a cylinder to open the explain drawer for it.
+ * The model is built from the ACTIVE PROFILE's architecture (engine/*), so
+ * the VRDE renders as the liquid-cooled inline four it is and the Rotax as a
+ * boxer. Every diagnosed fault lights the physical part it lives in, amber for
+ * a component and cyan for an instrument, and a cutaway shows the moving
+ * internals with true section faces.
  *
- * Lighting is a deliberate three-point studio rig rather than drei's
- * <Environment preset ...>, because presets fetch an HDR from a CDN at runtime
- * and a demo laptop cannot be assumed to have network. Everything here renders
- * offline.
+ * Lighting is built from Lightformers rather than an HDR file, so the demo
+ * renders identically with no network.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { EffectComposer, Bloom, SMAA } from '@react-three/postprocessing';
+import { CameraControls, Environment, Html, Lightformer, PerformanceMonitor } from '@react-three/drei';
+import { EffectComposer, Bloom, N8AO, SMAA, ToneMapping, Vignette } from '@react-three/postprocessing';
+import { ToneMappingMode } from 'postprocessing';
 import * as THREE from 'three';
 import { useMission, useCurrentTick, useEngineDisplay, coldBlend } from '../state/missionStore';
-import { damp, smoothstep } from '../state/interpolate';
-import { N_CYL } from '../types/telemetry';
-import {
-  CylinderAssembly, CylinderTag, Crankcase, Crankshaft,
-  IntakeSystem, ExhaustSystem, Turbocharger, GearboxNose, OilCooler,
-} from './engine/parts';
-import { SCENE } from '../theme';
+import { C, SCENE } from '../theme';
+import { LiveContext, createLive, easeParts, setPartTargets, useLive, type Live } from './engine/live';
+import { SectionProvider } from './engine/section';
+import { MatsProvider } from './engine/mats';
+import { engineGeometry, type Geometry } from './engine/kinematics';
+import { Inline4, inlineTagAnchor, INLINE_FLOOR } from './engine/Inline4';
+import { Boxer4, boxerTagAnchor, BOXER_FLOOR } from './engine/Boxer4';
+import { floorPool } from './engine/textures';
+import type { EngineProfile } from '../config/engines';
 
-/** Where the camera looks. Shared by OrbitControls and FitCamera so the two
- *  cannot disagree about what "centred" means. */
-const TARGET: [number, number, number] = [0.16, 0.28, 0];
+/** Crank display speed as a fraction of real: 3,600 rpm is an unreadable strobe. */
+const DISPLAY_SPEED = 0.045;
+/** Where the section plane rests when the cutaway is off, and where it cuts. */
+const CUT_OFF = 6, CUT_ON = -0.2;
+/** Default viewing direction from the model centre. */
+const HOME_DIR = new THREE.Vector3(0.3, 0.36, 1).normalize();
 
-/** How fast fault colour floods a cylinder. ~1.4 gives a bloom around a
- *  second — slow enough to read as an event, fast enough not to feel laggy. */
-const FAULT_BLOOM_LAMBDA = 1.4;
-
-/** The composed viewing angle. Used both as the Canvas's initial camera and as
- *  what "Reset view" restores, so the two cannot drift apart. Only the
- *  DIRECTION from TARGET matters — FitCamera solves the distance. */
-const CAMERA_HOME: [number, number, number] = [1.7, 2.15, 6.5];
-
-/** Half-extents of the engine in scene units: four cylinders on 1.42 spacing
- *  plus the turbo and the prop flange make it a long, fairly flat object. */
-const HALF_W = 3.7;
-/* Measured from the frame, not from the model: at 1.9 the sump ran off the
-   bottom of the stage viewport. The camera looks down from +y, so perspective
-   pushes the near underside lower than the model's own half-height suggests. */
-const HALF_H = 2.35;
-
-/**
- * Frame the engine to the viewport it actually has.
- *
- * The camera distance used to be a single hardcoded number, which worked only
- * because there was a single viewport: the 432px expert panel. The simple view's
- * full-bleed stage is nearly twice as tall and much wider, and one distance
- * cannot serve both — tuned for the stage, the engine overflowed the panel and
- * cropped to an unreadable close-up; tuned for the panel, it sat marooned in the
- * middle of the stage.
- *
- * So solve for it instead. Take the distance needed to fit the object's width
- * given the horizontal FOV and the distance needed to fit its height given the
- * vertical one, and use whichever is larger. This also handles window resizes
- * and a projector's aspect ratio for free, which the hardcoded value never did.
- */
-function FitCamera(
-  { resetNonce, controls }:
-  { resetNonce: number; controls: React.RefObject<OrbitControlsImpl | null> }
-) {
-  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
-  const width = useThree((s) => s.size.width);
-  const height = useThree((s) => s.size.height);
-  const lastReset = useRef(resetNonce);
-
-  useEffect(() => {
-    // A canvas can report a degenerate size on its first layout pass, and an
-    // aspect of 0 sends the horizontal FOV to 0, the division below to
-    // Infinity, and the camera somewhere from which nothing is visible. Wait
-    // for a real size instead — the effect re-runs as soon as there is one.
-    if (width < 1 || height < 1) return;
-
-    const vFov = THREE.MathUtils.degToRad(camera.fov);
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (width / height));
-    const dist = THREE.MathUtils.clamp(
-      Math.max(HALF_H / Math.tan(vFov / 2), HALF_W / Math.tan(hFov / 2)) * 1.16,
-      4,
-      20
-    );
-
-    const target = new THREE.Vector3(...TARGET);
-
-    // On a RESIZE, move along the CURRENT view direction so the reframe does
-    // not throw away an orbit the operator has already set up. On an explicit
-    // RESET, restore the composed viewing angle as well — that is the whole
-    // point of the control.
-    const isReset = resetNonce !== lastReset.current;
-    lastReset.current = resetNonce;
-
-    const dir = isReset
-      ? new THREE.Vector3(...CAMERA_HOME).sub(target).normalize()
-      : camera.position.clone().sub(target).normalize();
-
-    camera.position.copy(target).addScaledVector(dir, dist);
-    camera.updateProjectionMatrix();
-
-    // OrbitControls keeps its own spherical state and rewrites the camera every
-    // frame, so moving the camera behind its back is silently undone. Pushing
-    // update() makes it re-derive from the position we just set.
-    controls.current?.update();
-  }, [camera, width, height, resetNonce, controls]);
-
-  return null;
-}
-
-/**
- * Ground shadow.
- *
- * A hand-rolled gradient plane rather than drei's <ContactShadows>, which on
- * this scene rendered its shadow-catcher as a visibly lighter quadrilateral
- * with hard edges — invisible against the old black backdrop, obvious against
- * a white one. This is fully transparent where there is no shadow, so there is
- * no plane to see, and it costs one 256px canvas instead of a per-frame
- * shadow-map render.
- *
- * It is what sits the engine in the room rather than floating it on the page,
- * which matters far more on a light ground than it did on a dark one.
- */
-function GroundShadow() {
-  const texture = useMemo(() => {
-    const size = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    g.addColorStop(0, 'rgba(24,36,52,0.40)');
-    g.addColorStop(0.4, 'rgba(24,36,52,0.20)');
-    g.addColorStop(0.75, 'rgba(24,36,52,0.05)');
-    g.addColorStop(1, 'rgba(24,36,52,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    const t = new THREE.CanvasTexture(canvas);
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
-  }, []);
-
-  return (
-    <mesh position={[0.1, -1.29, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
-      {/* stretched to the engine's footprint — four cylinders is a long, narrow
-          object, and a circular shadow under it reads as a spotlight */}
-      <planeGeometry args={[10, 4.4]} />
-      <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} />
-    </mesh>
-  );
-}
+type View = 'exterior' | 'cutaway';
 
 // ---------------------------------------------------------------------------
-// Lighting rig — warm key, cool fill, hard rim. The cool fill is what keeps
-// aluminium reading as metal rather than as grey plastic.
-//
-// Retuned for a light room. The old point and spot lights ran at intensity 26
-// and 20 because they were lifting an object out of near-black; against a white
-// backdrop the same values blow the highlights out and the engine goes chalky,
-// so the ambient work moves to the hemisphere light and the punctual lights are
-// cut to what they are actually for — a specular hit on the machined faces.
+// Telemetry -> live, once per React render; animation clocks once per frame.
 // ---------------------------------------------------------------------------
-function Rig() {
-  const key = useRef<THREE.DirectionalLight>(null);
-  useEffect(() => {
-    if (!key.current) return;
-    key.current.shadow.mapSize.set(2048, 2048);
-    key.current.shadow.camera.near = 1;
-    key.current.shadow.camera.far = 26;
-    key.current.shadow.bias = -0.0006;
-  }, []);
-  return (
-    <>
-      {/* The studio environment. This is the single most important thing in the
-          light theme: these materials run at metalness 0.58-0.95, and a metal
-          renders as a reflection of its surroundings, so with no environment map
-          it renders BLACK. Against the old black backdrop that was invisible;
-          against white the engine became a silhouette.
-
-          Built from Lightformers rather than <Environment preset="...">, for the
-          same reason the rig was hand-built in the first place: presets fetch an
-          HDR from a CDN at runtime and a demo laptop cannot be assumed to have
-          network. This is generated on the GPU at startup and works offline. */}
-      <Environment resolution={256} frames={1}>
-        <color attach="background" args={['#dfe6ef']} />
-        {/* overhead softbox — the main thing the machined faces reflect */}
-        <Lightformer intensity={2.2} form="rect" scale={[12, 12, 1]} position={[0, 8, 0]} rotation={[-Math.PI / 2, 0, 0]} color="#ffffff" />
-        {/* side fills, so the barrels have something to catch on both flanks */}
-        <Lightformer intensity={1.1} form="rect" scale={[10, 6, 1]} position={[-8, 2, 3]} rotation={[0, Math.PI / 2, 0]} color="#eef4ff" />
-        <Lightformer intensity={0.9} form="rect" scale={[10, 6, 1]} position={[8, 2, -3]} rotation={[0, -Math.PI / 2, 0]} color="#fff6ea" />
-        {/* darker floor, so the underside does not glow and the engine keeps a
-            bottom edge against the page */}
-        <Lightformer intensity={0.35} form="rect" scale={[12, 12, 1]} position={[0, -5, 0]} rotation={[Math.PI / 2, 0, 0]} color="#9aa6b4" />
-      </Environment>
-
-      <hemisphereLight args={[SCENE.hemiSky, SCENE.hemiGround, 0.55]} />
-      <directionalLight ref={key} position={[5.5, 7.5, 4.5]} intensity={1.5} color={SCENE.key} castShadow />
-      <directionalLight position={[-6, 3.5, -3.5]} intensity={0.4} color={SCENE.fill} />
-      <directionalLight position={[0, 1.5, -7]} intensity={0.3} color={SCENE.rim} />
-      <pointLight position={[0, 3.2, 4.5]} intensity={5} distance={15} decay={2} color={SCENE.rim} />
-    </>
-  );
-}
-
-function Scene() {
+function Sync({ live }: { live: Live }) {
   const tick = useCurrentTick();
   const engine = useMission((s) => s.engine);
   const selected = useMission((s) => s.selectedCylinder);
-  const selectCylinder = useMission((s) => s.selectCylinder);
-  const [hovered, setHovered] = useState<number | null>(null);
+  const display = useEngineDisplay();
 
-  const crank = useRef(0);
-  const { gl } = useThree();
+  live.rpm = display.rpm;
+  live.running = display.running;
+  live.turboRpm = display.running ? tick.slow.turbo_rpm : tick.slow.turbo_rpm * display.startProgress;
+  live.effScale = tick.health.theta?.eta_c_scale.value ?? 1;
+  live.cht = tick.slow.cht_C.map((c) => coldBlend(c, display.chtScale));
+  live.egt = tick.slow.egt_C;
+  live.chtRampFrom = engine.chtRampFrom_C;
+  live.nominalEgt = engine.nominalEgt_C;
+  live.fuelFlow = tick.slow.fuel_flow_kgps;
+  live.map_hPa = tick.slow.map_hPa;
+  live.anomaly = tick.health.anomaly.score ?? 0;
+  live.selected = selected;
+  setPartTargets(live, tick.health.diagnosis, display.running);
+  // A CHT sensor the twin says is lying must not paint its cylinder hot: show
+  // the twin's own estimate for that head instead of the bad reading.
+  live.cht = live.cht.map((c, i) =>
+    live.partTargets.has(`cht:${i}`) ? coldBlend(tick.predicted.cht_C[i], display.chtScale) : c);
 
-  // While starting, the engine is turning slowly and the metal is still cold,
-  // so the crank and the thermal ramp both come from the spool rather than the
-  // live frame.
-  const engineDisplay = useEngineDisplay();
-  const rpm = engineDisplay.rpm;
+  useFrame((_, dtRaw) => {
+    // Easing must finish in real time even at a few frames per second (a
+    // slow laptop, a software renderer), so it gets the true frame time; only
+    // the crank is capped, so a stalled tab does not jump it half a turn.
+    const dt = Math.min(dtRaw, 0.5);
+    live.time += dt;
+    live.crank += Math.min(dt, 0.05) * (live.rpm / 60) * Math.PI * 2 * DISPLAY_SPEED;
+    easeParts(live, dt);
+    // Cutaway: ease, then sweep the plane through the engine.
+    live.cut += (live.cutTarget - live.cut) * (1 - Math.exp(-2.6 * dt));
+    const u = live.cut * live.cut * (3 - 2 * live.cut);
+    live.plane.constant = CUT_OFF + (CUT_ON - CUT_OFF) * u;
+  });
+  return null;
+}
 
+// ---------------------------------------------------------------------------
+// Studio: a dark room lit by long softboxes. Metals render as reflections of
+// their surroundings, so the strip lights are what draw the highlights along
+// every tube and casting edge.
+// ---------------------------------------------------------------------------
+function Studio({ floorY }: { floorY: number }) {
+  const key = useRef<THREE.DirectionalLight>(null);
   useEffect(() => {
-    gl.domElement.style.cursor = hovered !== null ? 'pointer' : 'grab';
-  }, [hovered, gl]);
-
-  const { diagnosis, anomaly } = tick.health;
-
-  // A stopped engine has no diagnosis to show, so nothing is flagged until the
-  // twin genuinely has frames to work from.
-  const cylFault = Array.from({ length: N_CYL }, (_, i) => {
-    if (!engineDisplay.running) return 0;
-    const hit = diagnosis.top.find((h) => h.cylinder === i && h.fault !== 'healthy');
-    return hit ? hit.p : 0;
-  });
-  const cylSensor = Array.from({ length: N_CYL }, (_, i) => {
-    const hit = diagnosis.top.find((h) => h.cylinder === i && h.fault !== 'healthy');
-    return hit ? hit.fault.includes('sensor') : false;
-  });
-
-  // Isolation arrives as a STEP: the classifier is silent, then names a
-  // cylinder at p=0.93 on one tick. Easing the probability lets the colour
-  // bloom into the cylinder over about a second instead of snapping, which is
-  // the difference between "a state changed" and "something is happening".
-  // Folded into the crank's existing once-per-frame state update so this costs
-  // no extra render pass.
-  const smooth = useRef<number[]>(Array.from({ length: N_CYL }, () => 0));
-  const [frame, setFrame] = useState(() => ({
-    crank: 0,
-    fault: Array.from({ length: N_CYL }, () => 0),
-  }));
-
-  useFrame((_, dt) => {
-    const d = Math.min(dt, 0.05);
-    // Heavily scaled — 3580 rpm at real speed is an unreadable strobe.
-    crank.current += d * (rpm / 60) * 0.15 * Math.PI * 2;
-    for (let i = 0; i < N_CYL; i++) {
-      smooth.current[i] = damp(smooth.current[i], cylFault[i], FAULT_BLOOM_LAMBDA, d);
-    }
-    setFrame({ crank: crank.current, fault: smooth.current.slice() });
-  });
-
-  const crankAngle = frame.crank;
-  const cylFaultSmooth = frame.fault;
-  // Blend the glow gate on the eased probability instead of switching it at a
-  // hard 0.3, so the emissive comes up with the colour rather than after it.
-  const cylAnomaly = cylFaultSmooth.map(
-    (p) => anomaly.score * (0.08 + 0.92 * smoothstep(0.2, 0.45, p))
-  );
-
+    const l = key.current;
+    if (!l) return;
+    l.shadow.mapSize.set(2048, 2048);
+    Object.assign(l.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 });
+    l.shadow.bias = -0.0004;
+    l.shadow.normalBias = 0.02;
+    l.shadow.camera.updateProjectionMatrix();
+  }, []);
+  const pool = useMemo(() => floorPool(), []);
   return (
     <>
-      <Rig />
-
-      <group position={[0, -0.1, 0]}>
-        <Crankcase count={N_CYL} />
-        <Crankshaft crankAngle={crankAngle} count={N_CYL} />
-
-        {Array.from({ length: N_CYL }, (_, i) => (
-          <CylinderAssembly
-            key={i}
-            index={i}
-            count={N_CYL}
-            cht={coldBlend(tick.slow.cht_C[i], engineDisplay.chtScale)}
-            egt={tick.slow.egt_C[i]}
-            chtRampFrom={engine.chtRampFrom_C}
-            anomaly={cylAnomaly[i]}
-            faultProb={cylFaultSmooth[i]}
-            isSensorFault={cylSensor[i]}
-            selected={selected === i}
-            hovered={hovered === i}
-            onSelect={() => selectCylinder(selected === i ? null : i)}
-            onHover={(h) => setHovered(h ? i : null)}
-            crankAngle={crankAngle}
-          />
-        ))}
-
-        <IntakeSystem count={N_CYL} />
-        <ExhaustSystem
-          egt={tick.slow.egt_C}
-          count={N_CYL}
-          nominalEgt={engine.nominalEgt_C}
-          chtRampFrom={engine.chtRampFrom_C}
-        />
-        <Turbocharger
-          rpm={tick.slow.turbo_rpm}
-          effScale={tick.health.theta?.eta_c_scale?.value ?? 1.0}
-          count={N_CYL}
-        />
-        <GearboxNose count={N_CYL} crankAngle={crankAngle} />
-        <OilCooler count={N_CYL} />
-
-        {Array.from({ length: N_CYL }, (_, i) => (
-          <CylinderTag
-            key={i}
-            index={i}
-            count={N_CYL}
-            cht={coldBlend(tick.slow.cht_C[i], engineDisplay.chtScale)}
-            faultProb={cylFaultSmooth[i]}
-            isSensorFault={cylSensor[i]}
-          />
-        ))}
-      </group>
-
-      {/* Soft grounding shadow. On a light floor this does most of the work of
-          sitting the engine in the room rather than floating it on the page —
-          on black the object read as grounded simply by being lighter than its
-          surroundings. No gridHelper: on a white studio floor a grid reads as
-          drawing-paper texture and fights the object for attention. */}
-      <GroundShadow />
-
+      <Environment resolution={512} frames={1}>
+        <color attach="background" args={['#0d1016']} />
+        {/* overhead softbox */}
+        <Lightformer form="rect" intensity={3.2} scale={[16, 6, 1]} position={[0, 9, 1]} rotation={[-Math.PI / 2, 0, 0]} color="#ffffff" />
+        {/* the big one behind the camera: what every camera-facing metal face reflects */}
+        <Lightformer form="rect" intensity={1.35} scale={[18, 7, 1]} position={[2, 3, 11]} rotation={[0, Math.PI, 0]} color="#e9f0f8" />
+        {/* strip lights: long highlights down every tube and casting edge */}
+        <Lightformer form="rect" intensity={5} scale={[0.7, 14, 1]} position={[-8, 3, 3]} rotation={[0, Math.PI / 2.6, 0]} color="#dbe8ff" />
+        <Lightformer form="rect" intensity={4.5} scale={[0.7, 14, 1]} position={[8, 3, 3]} rotation={[0, -Math.PI / 2.6, 0]} color="#fff1dc" />
+        {/* cool rim from behind, to separate the silhouette from the room */}
+        <Lightformer form="rect" intensity={2.4} scale={[14, 1.6, 1]} position={[0, 2, -9]} color="#8fb0ff" />
+        <Lightformer form="ring" intensity={3} scale={3} position={[6, 7, 6]} color="#ffffff" />
+      </Environment>
+      <hemisphereLight args={['#b9c7de', '#0c0f14', 0.35]} />
+      <directionalLight ref={key} position={[4, 10, 6]} intensity={1.6} color="#fff4e6" castShadow />
+      <directionalLight position={[-6, 3, -5]} intensity={0.6} color="#8fb0ff" />
+      <mesh position={[0, floorY - 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[26, 26]} />
+        <meshBasicMaterial map={pool} transparent depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, floorY, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[26, 26]} />
+        <shadowMaterial transparent opacity={0.55} />
+      </mesh>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cylinder tags: the per-cylinder CHT is the most important number on this
+// view, so it is HTML (crisp at any zoom), not geometry.
+// ---------------------------------------------------------------------------
+function Tags({ g, profile }: { g: Geometry; profile: EngineProfile }) {
+  const tick = useCurrentTick();
+  const display = useEngineDisplay();
+  const live = useLive();
+  const [, force] = useState(0);
+  // Faults ease in over about a second; re-read the eased values at 10 Hz
+  // rather than re-rendering the tags every frame.
+  useEffect(() => {
+    const id = setInterval(() => force((n) => n + 1), 100);
+    return () => clearInterval(id);
+  }, []);
+  const anchor = profile.architecture.layout === 'inline' ? inlineTagAnchor : boxerTagAnchor;
+  return (
+    <>
+      {g.frames.map((f) => {
+        const h = live.parts.get(`cyl:${f.index}`) ?? live.parts.get(`cht:${f.index}`);
+        const active = !!h && h.p > 0.4;
+        const accent = h?.sensor ? C.sensor : C.warn;
+        const cht = coldBlend(tick.slow.cht_C[f.index], display.chtScale);
+        return (
+          <Html key={f.index} position={anchor(g, f)} center zIndexRange={[30, 0]}>
+            <div className={`cyl-tag${active ? ' cyl-tag-on' : ''}`} style={active ? { borderColor: accent, color: accent } : undefined}>
+              <span className="cyl-tag-n">{f.index + 1}</span>
+              <span className="cyl-tag-v">{cht.toFixed(0)}°C</span>
+            </div>
+          </Html>
+        );
+      })}
+    </>
+  );
+}
+
+function Model({ profile, g, onHover }: { profile: EngineProfile; g: Geometry; onHover: (i: number | null) => void }) {
+  const selectCylinder = useMission((s) => s.selectCylinder);
+  const selected = useMission((s) => s.selectedCylinder);
+  const live = useLive();
+  const onSelect = (i: number) => selectCylinder(selected === i ? null : i);
+  const hover = (i: number | null) => { live.hovered = i; onHover(i); };
+  return profile.architecture.layout === 'inline'
+    ? <Inline4 g={g} profile={profile} onSelect={onSelect} onHover={hover} />
+    : <Boxer4 g={g} profile={profile} onSelect={onSelect} onHover={hover} />;
+}
+
+/**
+ * Frames whatever engine is loaded: measures the model's bounds and fits the
+ * camera to them, so a new profile never needs a hand-tuned distance.
+ * After a while idle, a slow sway keeps the hero shot alive without ever
+ * turning the faulted side away from the audience.
+ */
+function Rig({ target, resetNonce, profileId }: { target: React.RefObject<THREE.Group | null>; resetNonce: number; profileId: string }) {
+  const controls = useRef<CameraControls>(null);
+  const size = useThree((s) => s.size);
+  const idle = useRef(0);
+  const home = useRef(0);
+
+  useEffect(() => {
+    const c = controls.current, obj = target.current;
+    if (!c || !obj || size.width < 1) return;
+    const box = new THREE.Box3().setFromObject(obj);
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = box.getBoundingSphere(new THREE.Sphere()).radius;
+    const cam = c.camera as THREE.PerspectiveCamera;
+    const vFov = THREE.MathUtils.degToRad(cam.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (size.width / size.height));
+    const dist = (radius * 0.8) / Math.sin(Math.min(vFov, hFov) / 2);
+    const eye = center.clone().addScaledVector(HOME_DIR, dist);
+    c.minDistance = radius * 0.8;
+    c.maxDistance = dist * 2.2;
+    void c.setLookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, resetNonce > 0);
+    home.current = Math.atan2(HOME_DIR.x, HOME_DIR.z);
+    idle.current = 0;
+  }, [target, resetNonce, profileId, size.width, size.height]);
+
+  useFrame((_, dt) => {
+    const c = controls.current;
+    if (!c) return;
+    idle.current += dt;
+    if (idle.current > 12) {
+      const t = idle.current - 12;
+      c.azimuthAngle = home.current + Math.sin(t * 0.18) * 0.22 * Math.min(1, t / 4);
+    }
+  });
+
+  return (
+    <CameraControls
+      ref={controls}
+      makeDefault
+      smoothTime={0.55}
+      draggingSmoothTime={0.12}
+      minPolarAngle={0.2}
+      maxPolarAngle={Math.PI / 2.05}
+      truckSpeed={0}
+      onStart={() => { idle.current = -1e9; }}
+      onEnd={() => { idle.current = 0; }}
+    />
+  );
+}
+
+function Effects({ high }: { high: boolean }) {
+  return (
+    <EffectComposer multisampling={0} stencilBuffer>
+      {high ? <N8AO halfRes aoRadius={0.35} distanceFalloff={0.6} intensity={2.4} quality="medium" /> : <></>}
+      <Bloom intensity={SCENE.bloomIntensity} luminanceThreshold={SCENE.bloomThreshold} luminanceSmoothing={0.2} mipmapBlur />
+      <ToneMapping mode={ToneMappingMode.AGX} />
+      <Vignette offset={0.28} darkness={0.55} />
+      <SMAA />
+    </EffectComposer>
   );
 }
 
 export function Engine3D() {
-  // Bumping this re-runs FitCamera and restores CAMERA_HOME. The demo script
-  // hands the mouse to a judge to orbit the engine; without a way back, one
-  // stray scroll leaves it cropped for the rest of the presentation.
+  const profile = useMission((s) => s.engine);
+  const g = useMemo(() => engineGeometry(profile), [profile]);
+  const live = useMemo(() => createLive(), []);
+  // Dev-only handle for inspecting eased state from the console or a headless driver.
+  if (import.meta.env.DEV) (window as unknown as { __live?: Live }).__live = live;
+  const model = useRef<THREE.Group>(null);
+  const [view, setView] = useState<View>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'cutaway' ? 'cutaway' : 'exterior');
   const [resetNonce, setResetNonce] = useState(0);
-  const controls = useRef<OrbitControlsImpl>(null);
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [high, setHigh] = useState(true);
+  const floorY = profile.architecture.layout === 'inline' ? INLINE_FLOOR(g) : BOXER_FLOOR;
+
+  live.cutTarget = view === 'cutaway' ? 1 : 0;
 
   return (
-    <div className="engine3d">
-      {/* Position here only sets the viewing ANGLE — FitCamera overrides the
-          distance from the actual viewport. */}
+    <div className={`engine3d${hovered !== null ? ' engine3d-pointer' : ''}`}>
       <Canvas
         shadows
-        camera={{ position: CAMERA_HOME, fov: 37 }}
-        dpr={[1, 2]}
-        gl={{ antialias: false, toneMapping: THREE.NeutralToneMapping, toneMappingExposure: 1.0 }}
+        dpr={high ? [1, 1.75] : 1}
+        camera={{ fov: 30, near: 0.1, far: 120, position: [6, 6, 14] }}
+        gl={{ antialias: false, stencil: true, toneMapping: THREE.NoToneMapping, powerPreference: 'high-performance' }}
       >
-        <color attach="background" args={[SCENE.bg]} />
-        <fog attach="fog" args={[SCENE.bg, SCENE.fogNear, SCENE.fogFar]} />
-        <Scene />
-        {/* Both live here rather than in Scene so they can share the controls
-            ref and read the reset counter, which belongs to the component that
-            owns the button. */}
-        <FitCamera resetNonce={resetNonce} controls={controls} />
-        <OrbitControls
-          ref={controls}
-          enablePan={false}
-          enableDamping
-          dampingFactor={0.06}
-          minDistance={3.6}
-          maxDistance={22}
-          minPolarAngle={0.15}
-          maxPolarAngle={Math.PI / 2.08}
-          target={TARGET}
-        />
-        {/* Bloom is what makes a faulted cylinder read as GLOWING rather than
-            merely tinted — the difference between "that one is orange" and
-            "that one is wrong" at a glance from across a room.
-
-            The threshold is the load-bearing number of the light theme. On the
-            old black ground almost nothing exceeded 0.6, so the faulted cylinder
-            was the only thing that bloomed. On white nearly every pixel exceeds
-            0.6, so the same setting would bloom the entire frame into mush. It
-            now sits just above the backdrop's luminance and the fault's emissive
-            is pushed past it (SCENE.faultEmissive), restoring the original
-            property: the fault is the only thing in frame bright enough to glow.
-
-            No Vignette — edge darkening reads as dirt on a light page. */}
-        <EffectComposer multisampling={0}>
-          <Bloom
-            intensity={SCENE.bloomIntensity}
-            luminanceThreshold={SCENE.bloomThreshold}
-            luminanceSmoothing={0.25}
-            mipmapBlur
-          />
-          <SMAA />
-        </EffectComposer>
+        <LiveContext.Provider value={live}>
+          <PerformanceMonitor onDecline={() => setHigh(false)} flipflops={2} />
+          <color attach="background" args={[SCENE.bg]} />
+          <fog attach="fog" args={[SCENE.bg, SCENE.fogNear, SCENE.fogFar]} />
+          <Sync live={live} />
+          <Studio floorY={floorY} />
+          <SectionProvider>
+            <MatsProvider>
+              <group ref={model} key={profile.id}>
+                <Model profile={profile} g={g} onHover={setHovered} />
+              </group>
+              <Tags g={g} profile={profile} />
+            </MatsProvider>
+          </SectionProvider>
+          <Rig target={model} resetNonce={resetNonce} profileId={profile.id} />
+          <Effects high={high} />
+        </LiveContext.Provider>
       </Canvas>
-      <div className="engine3d-hint">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK A CYLINDER</div>
-      <button
-        className="engine3d-reset"
-        onClick={() => setResetNonce((n) => n + 1)}
-        title="Restore the framed view"
-      >
-        RESET VIEW
-      </button>
+
+      <div className="engine3d-tools" role="group" aria-label="Engine view">
+        <button className={view === 'exterior' ? 'on' : ''} onClick={() => setView('exterior')}>Exterior</button>
+        <button className={view === 'cutaway' ? 'on' : ''} onClick={() => setView('cutaway')}>Cutaway</button>
+        <span className="engine3d-tools-sep" />
+        <button onClick={() => setResetNonce((n) => n + 1)} title="Restore the framed view">Reset view</button>
+      </div>
+      <div className="engine3d-legend">
+        <span><i className="dot dot-fault" />Engine fault</span>
+        <span><i className="dot dot-sensor" />Sensor fault</span>
+        <span className="engine3d-legend-arch">{archLabel(profile)}</span>
+      </div>
+      <div className="engine3d-hint">Drag to orbit · scroll to zoom · click a cylinder</div>
     </div>
   );
+}
+
+function archLabel(p: EngineProfile): string {
+  const a = p.architecture;
+  const layout = a.layout === 'inline' ? `Inline-${p.cylinders}` : `Flat-${p.cylinders} boxer`;
+  const cooling = a.cooling === 'liquid' ? 'liquid-cooled' : 'liquid heads, air-cooled barrels';
+  const fuel = a.fuelSystem === 'common_rail' ? 'common-rail diesel' : 'carburetted';
+  return `${layout} · ${cooling} · ${fuel} · turbocharged`;
 }

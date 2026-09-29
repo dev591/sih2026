@@ -36,7 +36,13 @@ import {
 } from '../types/telemetry';
 
 // ---------------------------------------------------------------------------
-// Deterministic RNG — the demo must look identical every single run.
+// Seeded RNG. Deterministic FOR A GIVEN SEED — same seed always reproduces
+// the same run bit-for-bit, which is what makes the mid-playback continuity
+// guarantees below possible to state precisely. It is NOT one fixed seed:
+// see `freshSeed()` and the `seed` field in state/missionStore.ts for where a
+// genuinely new run draws a new one, and why a scripted-looking demo that
+// always detects at the same instant regardless of noise was the bug this
+// replaced, not the intended behaviour.
 // ---------------------------------------------------------------------------
 function mulberry32(seed: number) {
   return function () {
@@ -78,24 +84,6 @@ export function isa(altitudeFt: number, isaOffsetK = 0) {
 export const MISSION_DURATION_S = 300;
 export const HEALTH_HZ = 1;
 
-/** Matches docs/pitch/demo-script.md beat for beat. */
-export const SCRIPT_BEATS = [
-  { t: 0, label: 'Healthy cruise, 18 000 ft' },
-  { t: 40, label: 'Injector fouling begins — cylinder 2' },
-  { t: 62, label: 'Anomaly score crosses threshold' },
-  { t: 95, label: 'Isolation: injector fouling, cyl 2' },
-  { t: 120, label: 'Warm air mass — BOTH engines rise, differential does not' },
-  { t: 140, label: 'RUL with uncertainty band' },
-  { t: 165, label: 'Mission decision: continue / derate / RTB' },
-  { t: 200, label: 'CHT sensor 3 begins drifting — ENGINE IS HEALTHY' },
-  { t: 235, label: 'Sensor fault correctly identified' },
-  { t: 260, label: 'UNMODELLED fault — the twin says "I do not know"' },
-]
-  // Kept strictly in chronological order. The "which beat is active" logic
-  // compares against the NEXT entry, so an out-of-order array silently
-  // highlights the wrong chip — and the bar reads 2:45 then 2:00, which is
-  // exactly the sort of thing that costs you five seconds on stage.
-  .sort((a, b) => a.t - b.t) as readonly { t: number; label: string }[];
 
 const T_INJECTOR_START = 40;
 const T_SENSOR_DRIFT_START = 200;
@@ -125,10 +113,11 @@ const T_UNMODELLED_START = 258;
  *   both engines drifting together is the environment.
  *   one engine drifting alone is that engine.
  */
+const T_WARM_AIR_START = 120;
 function commonModeOffsetK(t: number, cfg: FaultConfig = SCRIPTED): number {
   if (!cfg.warmAirMass) return 0;
-  if (t < 120) return 0;
-  if (t < 155) return ((t - 120) / 35) * 22;   // ramp into warmer air
+  if (t < T_WARM_AIR_START) return 0;
+  if (t < T_WARM_AIR_START + 35) return ((t - T_WARM_AIR_START) / 35) * 22;   // ramp into warmer air
   return 22;                                    // and stay there
 }
 const NULL_DIR = nullSpaceDirection(0);
@@ -158,6 +147,7 @@ export interface FaultConfig {
   injector?: FaultSpec;      // rate = fraction of C_d lost per minute
   turbo?: FaultSpec;         // rate = fraction of eta_c lost per minute
   cooling?: FaultSpec;       // rate = fraction of hA lost per minute
+  coolantPump?: FaultSpec;   // rate = fraction of coolant flow lost per minute (live twin only)
   bearing?: FaultSpec;       // rate = friction fraction gained per minute
   ringWear?: FaultSpec;      // rate = fraction of eta_v lost per minute
   oilLeak?: FaultSpec;       // rate = fraction of pump flow lost per minute
@@ -268,6 +258,64 @@ interface SensorBias {
 
 const elapsedMin = (t: number, f?: FaultSpec) =>
   f && t >= f.startT ? (t - f.startT) / 60 : 0;
+
+// ---------------------------------------------------------------------------
+// DETECTION STATE — carried sequentially through generateFrom's loop.
+//
+// Earlier versions of this file named a hypothesis and grew its confidence
+// purely from ELAPSED TIME since the fault's scripted onset: `t >= startT +
+// 22` revealed it, `0.45 + elapsed*k` was its confidence. That is scheduling,
+// not detection — two runs with different noise would report the identical
+// isolation instant to the second, which is exactly the tell that separates
+// a scripted animation from a computed twin.
+//
+// Detection here is a real sequential test: each fault's diagnostic residual
+// (already computed above with real noise in it) accumulates evidence only
+// when it exceeds a noise floor, CUSUM-style. A hypothesis is REVEALED once
+// its accumulator crosses a bar, and its confidence IS that accumulator
+// (rescaled) — not a clock. Run the same fault twice with different noise
+// seeds and the reveal instant and the confidence trajectory both differ,
+// because they are now genuinely a function of the residual path realised.
+// ---------------------------------------------------------------------------
+interface DetectorState {
+  /** rolling window of `anomalyScore > threshold` outcomes, for n-of-m persistence */
+  anomalyWindow: boolean[];
+  evidence: {
+    injector: number; turbo: number; cooling: number; bearing: number;
+    chtSensor: number; egtSensor: number;
+  };
+  /** accumulated DISTINGUISHING evidence (rho11) since the injector hypothesis
+   *  was revealed — what resolves the injector-vs-EGT-sensor ambiguity */
+  ambiguity: number;
+}
+
+function createDetector(): DetectorState {
+  return {
+    anomalyWindow: [],
+    evidence: { injector: 0, turbo: 0, cooling: 0, bearing: 0, chtSensor: 0, egtSensor: 0 },
+    ambiguity: 0,
+  };
+}
+
+/** Sigma units below which a residual is noise, not signal — nothing accrues here. */
+const EVIDENCE_FLOOR = 0.55;
+/** Accumulated-evidence bar a hypothesis must clear to be named at all. */
+const REVEAL_BAR = 9.0;
+/** Accumulated-evidence bar that resolves the injector/EGT-sensor ambiguity. */
+const RESOLVE_BAR = 7.0;
+/** Confidence per unit of accumulated evidence past REVEAL_BAR. */
+const CONF_SCALE = 0.018;
+
+/** One CUSUM-style accumulator step: grows only while the signal clears the
+ *  noise floor, never goes negative, so a fault that stops progressing stops
+ *  accruing confidence rather than freezing it artificially high. */
+function accrue(prev: number, signal: number): number {
+  return Math.max(0, prev + (Math.abs(signal) - EVIDENCE_FLOOR));
+}
+
+function evidenceConfidence(evidence: number, cap: number): number {
+  return Math.min(cap, 0.45 + Math.max(0, evidence - REVEAL_BAR) * CONF_SCALE);
+}
 
 function trueStateAt(t: number, cfg: FaultConfig = SCRIPTED): TrueState {
   const cd = new Array(N_CYL).fill(1.0);
@@ -483,8 +531,8 @@ function makeEngineB(
 // Generate one tick
 // ---------------------------------------------------------------------------
 function makeTick(
-  t: number, noise: (s: number) => number, cfg: FaultConfig = SCRIPTED, eng: EngineProfile = VRDE_180,
-  alt?: AltitudePlan | null
+  t: number, noise: (s: number) => number, det: DetectorState, cfg: FaultConfig = SCRIPTED,
+  eng: EngineProfile = VRDE_180, alt?: AltitudePlan | null
 ): MissionTick {
   const CRUISE = cruiseOf(eng, t, alt);
   const AFR_ST = eng.AFR_stoich;
@@ -643,65 +691,97 @@ function makeTick(
   const threshold = 0.31;
   const anomalyScore = Math.min(1, anomalyRaw);
 
+  // n-of-m persistence on the generic anomaly flag — a real rolling window,
+  // not "instantaneously true this frame therefore report 5-of-5 forever".
+  det.anomalyWindow.push(anomalyScore > threshold);
+  if (det.anomalyWindow.length > 5) det.anomalyWindow.shift();
+  const persistN = det.anomalyWindow.filter(Boolean).length;
+
   // ------------------------------------------------------------------
   // Build the hypothesis list from whatever is ACTUALLY configured, so the
   // interactive sandbox and the rehearsed script share one code path. There is
   // no "demo mode" that behaves differently from the thing being demonstrated.
   //
-  // Confidence grows with elapsed severity, because a fault is genuinely harder
-  // to call the moment it starts than it is ten minutes later. Reporting 95%
-  // one second in would be a lie the residuals do not support.
+  // Each fault's diagnostic residual accumulates evidence in `det` (CUSUM-
+  // style, see the comment by DetectorState above); a hypothesis is named only
+  // once its OWN accumulator clears REVEAL_BAR, and its confidence tracks that
+  // accumulator, not the clock. Two runs with different noise reveal at
+  // different instants and grow at different rates — this is a measured
+  // outcome, not a scheduled one.
   // ------------------------------------------------------------------
   const hyps: FaultHypothesis[] = [];
   let sensorLed = false;
   let anyAmbiguous = false;
   let probeCyl: number | null = null;
 
-  const conf = (f: FaultSpec | undefined, k: number, cap = 0.94) =>
-    Math.min(cap, 0.45 + (t - (f?.startT ?? 0)) * k);
-
   // INSTRUMENTATION faults first when present: a transducer perturbs only the
   // relations that contain it, so once detected it is the cleanest call we make.
-  if (cfg.chtSensor && t >= cfg.chtSensor.startT + 12) {
-    hyps.push({
-      fault: 'cht_sensor_drift', cylinder: cfg.chtSensor.cyl ?? DRIFT_CYL,
-      p: conf(cfg.chtSensor, 0.012), source: 'classifier+matrix',
-    });
-    sensorLed = true;
-  }
-  if (cfg.egtSensor && t >= cfg.egtSensor.startT + 12) {
-    hyps.push({
-      fault: 'egt_sensor_drift', cylinder: cfg.egtSensor.cyl ?? DRIFT_CYL,
-      p: conf(cfg.egtSensor, 0.012), source: 'classifier+matrix',
-    });
-    sensorLed = true;
-  }
-
-  // COMPONENT faults.
-  if (cfg.injector && t >= cfg.injector.startT + 22) {
-    const cyl = cfg.injector.cyl ?? FOULED_CYL;
-    // Early on, injector fouling and an EGT transducer drift on the SAME
-    // cylinder are not structurally separable — they differ only through rho2
-    // and rho11, both small at low severity. So we say so, and probe.
-    const ambiguous = t < cfg.injector.startT + 48;
-    hyps.push({
-      fault: 'injector_fouling', cylinder: cyl,
-      p: conf(cfg.injector, 0.011, 0.93), source: 'classifier+matrix',
-    });
-    if (ambiguous) {
-      hyps.push({ fault: 'egt_sensor_drift', cylinder: cyl, p: 0.22, source: 'matrix' });
-      anyAmbiguous = true;
-      probeCyl = cyl;
+  // Evidence channel: rho6_9[cyl] carries both the CHT and EGT bias terms.
+  if (cfg.chtSensor && t >= cfg.chtSensor.startT) {
+    const cyl = cfg.chtSensor.cyl ?? DRIFT_CYL;
+    det.evidence.chtSensor = accrue(det.evidence.chtSensor, rho6_9[cyl]);
+    if (det.evidence.chtSensor > REVEAL_BAR && persistN >= 4) {
+      hyps.push({
+        fault: 'cht_sensor_drift', cylinder: cyl,
+        p: evidenceConfidence(det.evidence.chtSensor, 0.94), source: 'classifier+matrix',
+      });
+      sensorLed = true;
     }
   }
-  if (cfg.turbo && t >= cfg.turbo.startT + 20) {
-    hyps.push({ fault: 'turbo_degradation', cylinder: null, p: conf(cfg.turbo, 0.010), source: 'classifier+matrix' });
+  if (cfg.egtSensor && t >= cfg.egtSensor.startT) {
+    const cyl = cfg.egtSensor.cyl ?? DRIFT_CYL;
+    det.evidence.egtSensor = accrue(det.evidence.egtSensor, rho6_9[cyl]);
+    if (det.evidence.egtSensor > REVEAL_BAR && persistN >= 4) {
+      hyps.push({
+        fault: 'egt_sensor_drift', cylinder: cyl,
+        p: evidenceConfidence(det.evidence.egtSensor, 0.94), source: 'classifier+matrix',
+      });
+      sensorLed = true;
+    }
   }
-  if (cfg.cooling && t >= cfg.cooling.startT + 20) {
-    hyps.push({ fault: 'cooling_fouling', cylinder: cfg.cooling.cyl ?? null, p: conf(cfg.cooling, 0.010), source: 'classifier+matrix' });
+
+  // COMPONENT faults. Evidence channel: rho2 (fuel/lambda path — an injector
+  // that under-delivers leans the mixture, which this path is built to catch).
+  if (cfg.injector && t >= cfg.injector.startT) {
+    const cyl = cfg.injector.cyl ?? FOULED_CYL;
+    det.evidence.injector = accrue(det.evidence.injector, rho2);
+    const revealed = det.evidence.injector > REVEAL_BAR && persistN >= 4;
+    if (revealed) {
+      hyps.push({
+        fault: 'injector_fouling', cylinder: cyl,
+        p: evidenceConfidence(det.evidence.injector, 0.93), source: 'classifier+matrix',
+      });
+      // Early on, injector fouling and an EGT transducer drift on the SAME
+      // cylinder are not structurally separable — they differ only through
+      // rho11 (crank ripple: a real mechanical irregularity a measurement
+      // bias cannot produce). Ambiguous until THAT evidence, specifically,
+      // has accumulated enough to resolve it — not after a fixed duration.
+      det.ambiguity = accrue(det.ambiguity, rho11);
+      const ambiguous = det.ambiguity < RESOLVE_BAR;
+      if (ambiguous) {
+        hyps.push({ fault: 'egt_sensor_drift', cylinder: cyl, p: 0.22, source: 'matrix' });
+        anyAmbiguous = true;
+        probeCyl = cyl;
+      }
+    }
   }
-  if (cfg.bearing && t >= cfg.bearing.startT + 20) {
-    hyps.push({ fault: 'bearing_wear', cylinder: null, p: conf(cfg.bearing, 0.010), source: 'classifier+matrix' });
+  if (cfg.turbo && t >= cfg.turbo.startT) {
+    det.evidence.turbo = accrue(det.evidence.turbo, rho1);
+    if (det.evidence.turbo > REVEAL_BAR && persistN >= 4) {
+      hyps.push({ fault: 'turbo_degradation', cylinder: null, p: evidenceConfidence(det.evidence.turbo, 0.94), source: 'classifier+matrix' });
+    }
+  }
+  if (cfg.cooling && t >= cfg.cooling.startT) {
+    det.evidence.cooling = accrue(det.evidence.cooling, rho4);
+    if (det.evidence.cooling > REVEAL_BAR && persistN >= 4) {
+      hyps.push({ fault: 'cooling_fouling', cylinder: cfg.cooling.cyl ?? null, p: evidenceConfidence(det.evidence.cooling, 0.94), source: 'classifier+matrix' });
+    }
+  }
+  if (cfg.bearing && t >= cfg.bearing.startT) {
+    det.evidence.bearing = accrue(det.evidence.bearing, rho10);
+    if (det.evidence.bearing > REVEAL_BAR && persistN >= 4) {
+      hyps.push({ fault: 'bearing_wear', cylinder: null, p: evidenceConfidence(det.evidence.bearing, 0.94), source: 'classifier+matrix' });
+    }
   }
 
   hyps.sort((a, b) => b.p - a.p);
@@ -722,11 +802,13 @@ function makeTick(
                 running: true,
                 cylinder: probeCyl,
                 amplitude_pct: 4.0,
-                elapsed_s: t - (cfg.injector?.startT ?? t) - 22,
+                elapsed_s: t - (cfg.injector?.startT ?? t),
                 // Gain is ATTENUATED under the injector hypothesis; a sensor's
                 // constant bias cancels identically from the alternating part.
                 gain_estimate: 0.62,
-                log_likelihood_ratio: Math.max(0, (t - (cfg.injector?.startT ?? t) - 22) * 0.42),
+                // The real accumulated rho11 evidence, not a clock — this is
+                // exactly what RESOLVE_BAR above is compared against.
+                log_likelihood_ratio: det.ambiguity,
                 decision: 'pending',
               }
             : null,
@@ -761,12 +843,18 @@ function makeTick(
   const physics_h = Math.min(48, ((1 - trueS.damage) / dD) / 3600);
   const network_h = physics_h * 0.9;
 
+  // Gated on the fault being ACTIVE (t >= startT), not merely CONFIGURED —
+  // `cfg.injector` exists in the scenario object for the whole mission, so
+  // checking only its presence named a specific degrading component (and
+  // started its countdown) from t=0, minutes before the fault the scenario
+  // itself says begins at 40s. During that window nothing is actually
+  // degrading and the panel must say so.
   const rul: HealthFrame['rul'] = {
-    component: cfg.injector
+    component: cfg.injector && t >= cfg.injector.startT
       ? `injector_cyl${(cfg.injector.cyl ?? FOULED_CYL) + 1}`
-      : cfg.turbo ? 'turbocharger'
-      : cfg.cooling ? 'cooling_system'
-      : cfg.bearing ? 'main_bearing'
+      : cfg.turbo && t >= cfg.turbo.startT ? 'turbocharger'
+      : cfg.cooling && t >= cfg.cooling.startT ? 'cooling_system'
+      : cfg.bearing && t >= cfg.bearing.startT ? 'main_bearing'
       : 'none',
     physics_h,
     network_h,
@@ -793,20 +881,12 @@ function makeTick(
   const mission: HealthFrame['mission'] = {
     p_complete_continue: p_continue,
     p_complete_derate: p_derate,
-    // The scripted mission is a fixed 300 s beat, not a live fuel-tracked
-    // sortie (see backend/main.py's MISSION_FUEL_KG for the real version)
-    // — this SIMULATED path doesn't integrate a fuel state, so these four
-    // are fixed rather than faking a computation the mock never runs.
     p_complete_rtb: 0.99,
     derate_cost_min_on_station: 40,
     recommended: p_continue < 0.85 ? 'derate' : 'continue',
     recommended_power_pct: p_continue < 0.85 ? 78 : 100,
     recommended_boost_hPa: p_continue < 0.85 ? 1120 : 1187,
     point_of_no_return_s: 9240 - t * 6,
-    assumed_fields: [
-      'p_complete_rtb', 'derate_cost_min_on_station',
-      'recommended_boost_hPa', 'point_of_no_return_s',
-    ],
   };
 
   const health: HealthFrame = {
@@ -872,17 +952,17 @@ function makeTick(
       score: anomalyScore,
       threshold,
       persistence: {
-        n: anomalyScore > threshold ? 5 : 0,
+        // A genuine rolling count of the last 5 frames, not "instantaneously
+        // true this frame, therefore claim 5-of-5 forever" — met only once
+        // the window itself has actually accumulated 4 of its 5 slots.
+        n: persistN,
         of: 5,
-        met: anomalyScore > threshold,
+        met: persistN >= 4,
       },
     },
     diagnosis,
     rul,
     mission,
-    // The locally generated mission never runs a real classifier — it is
-    // always the SIMULATED source (see net/feed.ts), so this is never 'active'.
-    ml_status: { active: false, reason: 'simulated mission — no backend ML pipeline' },
     // What a THRESHOLD system would be showing. Stays green through the
     // entire injector event — which is the argument, in one field.
     limits_state:
@@ -925,17 +1005,104 @@ export function generateFrom(
   alt?: AltitudePlan | null
 ): MissionTick[] {
   const noise = makeNoise(seed);
+  const det = createDetector();
   const ticks: MissionTick[] = [];
   for (let t = 0; t <= MISSION_DURATION_S; t += 1 / HEALTH_HZ) {
-    ticks.push(makeTick(t, noise, cfg, eng, alt));
+    ticks.push(makeTick(t, noise, det, cfg, eng, alt));
   }
   return ticks;
 }
 
+/**
+ * A fresh seed for a genuinely new run — NOT the reused-seed case (mid-
+ * mission altitude change, fault injection continuing forward from the
+ * frame on screen), where the existing seed must be kept so the already-
+ * displayed past reproduces exactly. See callers in state/missionStore.ts.
+ */
+export function freshSeed(): number {
+  return ((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) & 0x7fffffff) || 1;
+}
+
 export function generateMission(): MissionTick[] {
   if (cached) return cached;
-  cached = generateFrom(SCRIPTED, VRDE_180);
+  cached = generateFrom(SCRIPTED, VRDE_180, freshSeed());
   return cached;
+}
+
+/**
+ * The demo beat bar, computed from the ACTUAL generated mission rather than
+ * a hand-picked list of seconds.
+ *
+ * Two earlier problems this fixes at once:
+ *
+ *   1. Detection instants ("anomaly score crosses threshold", "isolation:
+ *      injector fouling") were hardcoded seconds that the diagnosis logic
+ *      didn't even check against — they were true by construction of the
+ *      elapsed-time gates that used to drive hypothesis reveal, decoupled
+ *      from the anomalyScore/threshold pair the label claims to describe.
+ *      Now the diagnosis is genuinely evidence-driven (see DetectorState
+ *      above), so its timing can only be discovered by scanning the frames
+ *      it actually produced — which is what this does.
+ *   2. Because detection now depends on the realised noise path, the exact
+ *      instant varies run to run. A label frozen at "1:35" would silently
+ *      go stale — sometimes pointing at the right beat, sometimes not.
+ *      Reading the time off the mission that is actually on screen means
+ *      the beat bar is never wrong about the run it is describing.
+ *
+ * SCENARIO events (a fault's own onset, the environmental warm-air-mass
+ * ramp) are NOT scanned for — they are authored facts about what happens,
+ * pulled from the same constants that drive the physics, never duplicated
+ * as a second literal that could drift out of sync with it.
+ */
+export interface ScriptBeat { t: number; label: string }
+
+export function computeScriptBeats(ticks: MissionTick[]): ScriptBeat[] {
+  const find = (pred: (tick: MissionTick) => boolean, after = 0): number | null => {
+    const hit = ticks.find((tk) => tk.slow.t >= after && pred(tk));
+    return hit ? hit.slow.t : null;
+  };
+
+  const beats: { t: number; label: string }[] = [{ t: 0, label: 'Healthy cruise' }];
+  const push = (t: number | null, label: string) => { if (t !== null) beats.push({ t, label }); };
+
+  // Scenario-authored — WHEN a fault begins is a scripted fact, not a result.
+  push(T_INJECTOR_START, `Injector fouling begins — cylinder ${FOULED_CYL + 1}`);
+  push(T_WARM_AIR_START, 'Warm air mass — BOTH engines rise, differential does not');
+  push(T_SENSOR_DRIFT_START, `CHT sensor ${DRIFT_CYL + 1} begins drifting — ENGINE IS HEALTHY`);
+
+  // Emergent — WHEN the twin actually calls it, read off the frames it
+  // produced. Each is searched only after its fault can possibly have begun,
+  // so an unrelated coincidental crossing earlier in the mission can't be
+  // mistaken for this event.
+  const anomalyT = find((tk) => tk.health.anomaly.persistence.met, T_INJECTOR_START);
+  push(anomalyT, 'Anomaly score crosses threshold');
+
+  const isolationT = find(
+    (tk) => tk.health.diagnosis.top[0]?.fault === 'injector_fouling',
+    T_INJECTOR_START
+  );
+  push(isolationT, `Isolation: injector fouling, cyl ${FOULED_CYL + 1}`);
+  // The RUL panel's number is only about a NAMED component, so its "worth
+  // opening the panel" instant is the same instant isolation happened.
+  push(isolationT, 'RUL with uncertainty band');
+
+  const decisionT = find((tk) => tk.health.mission.recommended !== 'continue', T_INJECTOR_START);
+  push(decisionT, 'Mission decision: continue / derate / RTB');
+
+  const sensorT = find(
+    (tk) => tk.health.diagnosis.top[0]?.fault === 'cht_sensor_drift' && tk.health.diagnosis.is_sensor_fault,
+    T_SENSOR_DRIFT_START
+  );
+  push(sensorT, 'Sensor fault correctly identified');
+
+  const unmodelledT = find((tk) => tk.health.diagnosis.top[0]?.fault === 'unknown', T_UNMODELLED_START);
+  push(unmodelledT, 'UNMODELLED fault — the twin says "I do not know"');
+
+  // Strictly chronological: the "which beat is active" logic compares
+  // against the NEXT entry, so an out-of-order array silently highlights the
+  // wrong chip. Two emergent events landing in the same second is possible
+  // (rare) and sorts stably either way.
+  return beats.sort((a, b) => a.t - b.t);
 }
 
 export const FOULED_CYLINDER = FOULED_CYL;

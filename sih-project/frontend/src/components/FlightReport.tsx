@@ -32,8 +32,12 @@ import {
 /** Residuals are in sigma units, so the threshold for "excited" is absolute. */
 const EXCITED_SIGMA = 2.0;
 
-function fmt(n: number, dp = 1): string {
-  return Number.isFinite(n) ? n.toFixed(dp) : '—';
+function fmt(n: number | null | undefined, dp = 1): string {
+  return n != null && Number.isFinite(n) ? n.toFixed(dp) : '—';
+}
+
+function pct(p: number | null): string {
+  return p == null ? '—' : `${(p * 100).toFixed(0)} %`;
 }
 
 function clock(seconds: number): string {
@@ -71,7 +75,9 @@ export function FlightReport() {
     .filter((r) => r.v !== null && Math.abs(r.v) >= EXCITED_SIGMA);
   const quiet = available - excited.length;
 
-  const classification = healthy
+  const classification = diagnosis.unavailable
+    ? 'NO DIAGNOSIS (ML OFFLINE)'
+    : healthy
     ? 'NO FINDING'
     : diagnosis.is_sensor_fault
       ? 'INSTRUMENTATION'
@@ -257,29 +263,29 @@ export function FlightReport() {
             <tbody>
               <tr>
                 <td>Volumetric efficiency scale η<sub>v</sub></td>
-                <td className="num">{fmt(theta?.eta_v_scale?.value ?? 1, 3)}</td>
-                <td className="num">{fmt(theta?.eta_v_scale?.sigma ?? 0, 3)}</td>
+                <td className="num">{fmt(theta?.eta_v_scale.value, 3)}</td>
+                <td className="num">{fmt(theta?.eta_v_scale.sigma, 3)}</td>
               </tr>
               <tr>
                 <td>Compressor efficiency scale η<sub>c</sub></td>
-                <td className="num">{fmt(theta?.eta_c_scale?.value ?? 1, 3)}</td>
-                <td className="num">{fmt(theta?.eta_c_scale?.sigma ?? 0, 3)}</td>
+                <td className="num">{fmt(theta?.eta_c_scale.value, 3)}</td>
+                <td className="num">{fmt(theta?.eta_c_scale.sigma, 3)}</td>
               </tr>
               <tr>
                 <td>Cooling effectiveness scale (hA)</td>
-                <td className="num">{fmt(theta?.hA_scale?.value ?? 1, 3)}</td>
-                <td className="num">{fmt(theta?.hA_scale?.sigma ?? 0, 3)}</td>
+                <td className="num">{fmt(theta?.hA_scale.value, 3)}</td>
+                <td className="num">{fmt(theta?.hA_scale.sigma, 3)}</td>
               </tr>
               <tr>
                 <td>Friction scale f<sub>fric</sub></td>
-                <td className="num">{fmt(theta?.f_fric_scale?.value ?? 1, 3)}</td>
-                <td className="num">{fmt(theta?.f_fric_scale?.sigma ?? 0, 3)}</td>
+                <td className="num">{fmt(theta?.f_fric_scale.value, 3)}</td>
+                <td className="num">{fmt(theta?.f_fric_scale.sigma, 3)}</td>
               </tr>
               {Array.from({ length: N_CYL }, (_, i) => (
                 <tr key={i}>
                   <td>Injector discharge coefficient C<sub>d</sub> — cylinder {i + 1}</td>
-                  <td className="num">{fmt(theta?.cd_inj?.value?.[i] ?? 1, 3)}</td>
-                  <td className="num">{fmt(theta?.cd_inj?.sigma?.[i] ?? 0, 3)}</td>
+                  <td className="num">{fmt(theta?.cd_inj.value[i], 3)}</td>
+                  <td className="num">{fmt(theta?.cd_inj.sigma[i], 3)}</td>
                 </tr>
               ))}
             </tbody>
@@ -317,16 +323,16 @@ export function FlightReport() {
                 <tr><th>Option</th><th className="num">P(complete)</th></tr>
               </thead>
               <tbody>
-                <tr><td>Continue</td><td className="num">{(mission.p_complete_continue * 100).toFixed(0)} %</td></tr>
-                <tr><td>Derate</td><td className="num">{(mission.p_complete_derate * 100).toFixed(0)} %</td></tr>
-                <tr><td>Return to base</td><td className="num">{(mission.p_complete_rtb * 100).toFixed(0)} %</td></tr>
+                <tr><td>Continue</td><td className="num">{pct(mission.p_complete_continue)}</td></tr>
+                <tr><td>Derate</td><td className="num">{pct(mission.p_complete_derate)}</td></tr>
+                <tr><td>Return to base</td><td className="num">{pct(mission.p_complete_rtb)}</td></tr>
                 <tr className="row-strong">
                   <td>Recommended</td>
-                  <td className="num">{mission.recommended.toUpperCase()}</td>
+                  <td className="num">{mission.recommended ? mission.recommended.toUpperCase() : 'NO ESTIMATE'}</td>
                 </tr>
                 <tr>
                   <td>Cost of derate</td>
-                  <td className="num">{fmt(mission.derate_cost_min_on_station, 0)} min on station</td>
+                  <td className="num">{mission.derate_cost_min_on_station == null ? 'not modelled' : `${fmt(mission.derate_cost_min_on_station, 0)} min on station`}</td>
                 </tr>
               </tbody>
             </table>

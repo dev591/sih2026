@@ -30,16 +30,17 @@ export interface SlowFrame {
   oil_press_bar: number;
   oil_temp_C: number;
   fuel_flow_kgps: number;
-  fuel_rail_bar: number;
+  /** null = not modelled (served as a frozen constant before 2026-09-24). */
+  fuel_rail_bar: number | null;
   lambda: number;               // wideband UEGO — parity Path 3 depends on this
   turbo_rpm: number;
   comp_out_p_hPa: number;
   comp_out_T_K: number;
-  inj_timing_deg: number;       // PS component B, named explicitly
-  bus_voltage_V: number;        // PS component B, named explicitly
-  alternator_A: number;         // PS component B, named explicitly
+  inj_timing_deg: number | null;       // PS component B — null: not modelled
+  bus_voltage_V: number | null;        // PS component B — null: not modelled
+  alternator_A: number | null;         // PS component B — null: not modelled
   throttle_pct: number;
-  vib_rms_g: PerCylinder;
+  vib_rms_g: PerCylinder | null;   // null: no vibration model
 
   altitude_ft: number;
   tas_mps: number;
@@ -74,11 +75,11 @@ export interface FastFeatures {
    *  rotation, so a single-cylinder defect appears at 0.5 engine order.
    *  Zero for a balanced engine. */
   order_0p5_mag: number;
-  order_0p5_phase_deg: number;  // phase localises WHICH cylinder
-  order_1p0_mag: number;
-  order_2p0_mag: number;
+  order_0p5_phase_deg: number | null;  // null: not modelled
+  order_1p0_mag: number | null;
+  order_2p0_mag: number | null;
   knock_intensity: PerCylinder;
-  vib_band_rms: { lo_0_500: number; mid_500_5k: number; hi_5k_20k: number };
+  vib_band_rms: { lo_0_500: number; mid_500_5k: number; hi_5k_20k: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,24 +119,29 @@ export interface HealthParams {
   hA_scale: Estimate;        // cooling
   cd_inj: PerCylEstimate;    // injector discharge coefficient, per cylinder
   f_fric_scale: Estimate;    // friction — bearing wear
+  /** LIVE only — health parameters the engine model gained since v1. */
+  rad_eff_scale?: Estimate;  // radiator effectiveness
+  cool_pump_scale?: Estimate; // coolant pump flow
+  oil_pump_scale?: Estimate; // oil pump delivery
+  fuel_rail_scale?: Estimate; // fuel supply (filter)
 }
 
 /** Analytical redundancy. If a quantity is recoverable along several paths,
  *  any one path supplies it when its sensor is absent. DRDO asks for virtual
  *  sensing by name — these are the payoff. */
 export interface VirtualSensors {
-  peak_cyl_press_bar: PerCylinder;
-  knock_margin_deg: number;
+  peak_cyl_press_bar: PerCylinder | null;   // null: no in-cylinder pressure model
+  knock_margin_deg: number | null;           // null: not modelled
   turbo_shaft_rpm_est: number;
-  comb_efficiency: PerCylinder;
+  comb_efficiency: PerCylinder | null;      // null: not modelled
   air_mass_flow_kgps: number;
   brake_power_kW: number;
   bsfc_g_per_kWh: number;    // DEGRADED, not the book figure — drives the PNR
 }
 
 export interface AnomalyState {
-  score: number;
-  threshold: number;         // 99.5th pct of healthy held-out. Never hand-picked.
+  score: number | null;
+  threshold: number | null;  // 99.5th pct of healthy held-out. Never hand-picked.
   persistence: { n: number; of: number; met: boolean };
 }
 
@@ -143,11 +149,12 @@ export type FaultId =
   | 'healthy'
   | 'unknown'
   | 'injector_fouling'
-  | 'ignition_misfire'
+  | 'injection_misfire'
   | 'ring_wear'
   | 'oil_pump_wear'
   | 'turbo_degradation'
   | 'cooling_fouling'
+  | 'coolant_pump_degradation'
   | 'detonation'
   | 'fuel_filter_clog'
   | 'bearing_wear'
@@ -170,6 +177,10 @@ export interface Diagnosis {
   /** true => structure cannot separate the hypotheses; active diagnosis armed */
   ambiguous: boolean;
   probe: ActiveProbe | null;
+  /** Faults the structure measurably cannot separate from the top call. */
+  inseparable_from?: FaultId[];
+  /** true: the ML layer is down and there is NO diagnosis this tick. */
+  unavailable?: boolean;
 }
 
 /** Active diagnosis: when structure cannot resolve, the system commands a small
@@ -191,11 +202,13 @@ export interface RulEstimate {
    *  supplied no rate yet — the head has not reported, which is different from
    *  it reporting an unbounded life. */
   physics_h: number | null;
-  network_h: number;         // quantile-regression p50
-  p10_h: number;
-  p50_h: number;
-  p90_h: number;
-  reported_h: number;        // the CONSERVATIVE of the two heads
+  network_h: number | null;  // severity-trend head, p50 of the Monte Carlo
+  p10_h: number | null;
+  p50_h: number | null;
+  p90_h: number | null;
+  /** The CONSERVATIVE of the two heads. null: no engine fault diagnosed, or
+   *  no redline predicted inside the fault's modelled range. */
+  reported_h: number | null;
   heads_disagree: boolean;   // disagreement beyond the interval is itself a warning
 }
 
@@ -203,18 +216,22 @@ export interface RulEstimate {
  *  quantified risk, and the cost of the safe one — because reliability advice
  *  that ignores mission value is ignored advice. */
 export interface MissionDecision {
-  p_complete_continue: number;
-  p_complete_derate: number;
-  p_complete_rtb: number;
-  derate_cost_min_on_station: number;
-  recommended: 'continue' | 'derate' | 'rtb';
-  recommended_power_pct: number;
-  recommended_boost_hPa: number;
+  /** null while the ML layer is unavailable — never a guess. */
+  p_complete_continue: number | null;
+  p_complete_derate: number | null;
+  p_complete_rtb: number | null;
+  derate_cost_min_on_station: number | null;   // null: needs an airframe model
+  recommended: 'continue' | 'derate' | 'rtb' | null;
+  recommended_power_pct: number | null;
+  recommended_boost_hPa: number | null;
+  method?: 'monte_carlo';
+  m?: number;
+  assumed_fields?: string[];
+  assumed_inputs?: Record<string, number | boolean>;
+  /** P(no redline yet) at 10 %, 20 % … 100 % of the remaining mission if it
+   *  continues — straight from the Monte Carlo draws. */
+  survival_continue?: number[] | null;
   point_of_no_return_s: number;   // from remaining fuel and DEGRADED bsfc
-  /** Keys of THIS interface that are still fixed engineering estimates, not
-   *  computed this tick (see backend/main.py's MISSION_FUEL_KG comment for
-   *  why point_of_no_return_s and p_complete_rtb are NOT in this list). */
-  assumed_fields: string[];
 }
 
 export type LimitsState = 'green' | 'caution' | 'exceeded';
@@ -240,22 +257,13 @@ export interface TwinConfidence {
   note: string;
 }
 
-/** Whether `diagnosis`/`anomaly`/`rul`/`theta`/`novelty` on THIS frame came
- *  from the real M2/M3/UKF classifier (`active: true`) or from the
- *  ground-truth stub in `main.py::_diagnosis()` (`active: false`). The stub
- *  is schema-identical to a real diagnosis — this is the only field that
- *  tells them apart, so it must be checked and surfaced, never assumed. */
-export interface MlStatus {
-  active: boolean;
-  reason: string | null;
-}
-
 export interface HealthFrame {
   schema: 'pramana.health.v1';
   t: number;
   engine_id: 'A' | 'B';
   rho: ResidualVector;
-  theta: HealthParams | null;   // null when ML pipeline unavailable (physics-only mode)
+  /** null while the ML layer is unavailable. */
+  theta: HealthParams | null;
   virtual: VirtualSensors;
   anomaly: AnomalyState;
   diagnosis: Diagnosis;
@@ -263,10 +271,19 @@ export interface HealthFrame {
   mission: MissionDecision;
   novelty?: NoveltyState;
   twin_confidence?: TwinConfidence;
-  ml_status: MlStatus;
   /** What a THRESHOLD system would be showing right now. Keep it on screen:
    *  the contrast is the whole argument. */
   limits_state: LimitsState;
+  /** LIVE only: whether the ML layer produced this frame's diagnosis. */
+  ml_status?: { active: boolean; reason: string | null; commissioned?: string | null };
+  /** LIVE only: the extended residuals, by name. */
+  rho_ext?: Record<string, number | null>;
+  /** LIVE only: the evidence behind the current call — the recent residual
+   *  window and the MEASURED signature of the fault being named. */
+  explain?: { features: string[]; live: number[]; signature: number[];
+             signature_key: string; match_cosine: number } | null;
+  /** LIVE only: schema fields that are null because nothing models them. */
+  unmodelled?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -328,13 +345,16 @@ export const FAULT_LABELS: Record<FaultId, string> = {
   healthy: 'Healthy',
   unknown: 'Unrecognised excitation',
   injector_fouling: 'Injector fouling',
-  ignition_misfire: 'Ignition misfire',
+  // Diesel terms: a compression-ignition engine has no ignition system, and
+  // 'pre-ignition' / 'vapour lock' are petrol-engine phenomena.
+  injection_misfire: 'Misfire (combustion failure)',
   ring_wear: 'Piston ring wear / blow-by',
   oil_pump_wear: 'Oil leak / pump wear',
   turbo_degradation: 'Turbocharger degradation',
-  cooling_fouling: 'Cooling / intercooler fouling',
-  detonation: 'Detonation / pre-ignition',
-  fuel_filter_clog: 'Fuel filter clog / vapour lock',
+  cooling_fouling: 'Radiator fouling',
+  coolant_pump_degradation: 'Coolant pump degradation',
+  detonation: 'Combustion knock',
+  fuel_filter_clog: 'Fuel filter clog',
   bearing_wear: 'Bearing wear',
   map_sensor_drift: 'MAP sensor drift',
   egt_sensor_drift: 'EGT sensor drift',

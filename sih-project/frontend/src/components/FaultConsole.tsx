@@ -19,15 +19,16 @@
  * watched a recording never will.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMission } from '../state/missionStore';
 import { Panel } from './Panels';
 import { SCRIPTED, type FaultConfig } from '../mock/missionGenerator';
 import { N_CYL } from '../types/telemetry';
 
 type Kind =
-  | 'injector' | 'turbo' | 'cooling' | 'bearing'
-  | 'chtSensor' | 'egtSensor' | 'unmodelled';
+  | 'injector' | 'misfire' | 'detonation' | 'turbo' | 'cooling' | 'coolantPump'
+  | 'bearing' | 'oilLeak' | 'ringWear' | 'fuelFilter'
+  | 'chtSensor' | 'egtSensor' | 'mapSensor' | 'lambdaSensor' | 'unmodelled';
 
 interface KindDef {
   kind: Kind;
@@ -42,14 +43,26 @@ interface KindDef {
   def: number;
 }
 
+// Units are the live engine model's own (backend/twin/faults.py): each fault
+// is a parameter change ramped at `rate` per minute from the moment it is
+// injected, never a drawn signature.
 const KINDS: KindDef[] = [
-  { kind: 'injector',   label: 'Injector fouling',        family: 'component',  perCylinder: true,  unit: '%/min C_d', min: 0.01, max: 0.12, step: 0.005, def: 0.045 },
-  { kind: 'turbo',      label: 'Turbocharger degradation', family: 'component',  perCylinder: false, unit: '%/min η_c', min: 0.005, max: 0.06, step: 0.005, def: 0.02 },
-  { kind: 'cooling',    label: 'Cooling / intercooler fouling', family: 'component', perCylinder: false, unit: '%/min hA', min: 0.005, max: 0.06, step: 0.005, def: 0.02 },
-  { kind: 'bearing',    label: 'Bearing wear',            family: 'component',  perCylinder: false, unit: '%/min friction', min: 0.01, max: 0.10, step: 0.005, def: 0.03 },
-  { kind: 'chtSensor',  label: 'CHT sensor drift',        family: 'instrument', perCylinder: true,  unit: '°C/min', min: 4, max: 60, step: 2, def: 24 },
-  { kind: 'egtSensor',  label: 'EGT sensor drift',        family: 'instrument', perCylinder: true,  unit: '°C/min', min: 10, max: 200, step: 5, def: 70 },
-  { kind: 'unmodelled', label: 'Fault outside the library', family: 'unknown',  perCylinder: false, unit: 'σ/s', min: 0.2, max: 1.5, step: 0.1, def: 0.62 },
+  { kind: 'injector',     label: 'Injector fouling',           family: 'component',  perCylinder: true,  unit: '/min C_d',       min: 0.01, max: 0.12, step: 0.005, def: 0.045 },
+  { kind: 'misfire',      label: 'Misfire',                    family: 'component',  perCylinder: true,  unit: '/min P(skip)',   min: 0.03, max: 0.30, step: 0.01,  def: 0.10 },
+  { kind: 'detonation',   label: 'Detonation',                 family: 'component',  perCylinder: true,  unit: '/min severity',  min: 0.03, max: 0.30, step: 0.01,  def: 0.10 },
+  { kind: 'turbo',        label: 'Turbocharger degradation',   family: 'component',  perCylinder: false, unit: '/min η_c',       min: 0.01, max: 0.10, step: 0.005, def: 0.04 },
+  { kind: 'cooling',      label: 'Radiator fouling',           family: 'component',  perCylinder: false, unit: '/min radiator',  min: 0.02, max: 0.20, step: 0.01,  def: 0.08 },
+  { kind: 'coolantPump',  label: 'Coolant pump degradation',   family: 'component',  perCylinder: false, unit: '/min flow',      min: 0.02, max: 0.20, step: 0.01,  def: 0.08 },
+  { kind: 'bearing',      label: 'Bearing wear',               family: 'component',  perCylinder: false, unit: '/min friction',  min: 0.03, max: 0.40, step: 0.01,  def: 0.12 },
+  { kind: 'oilLeak',      label: 'Oil pump wear / leak',       family: 'component',  perCylinder: false, unit: '/min delivery',  min: 0.03, max: 0.30, step: 0.01,  def: 0.10 },
+  { kind: 'ringWear',     label: 'Piston ring wear',           family: 'component',  perCylinder: false, unit: '/min η_v',       min: 0.01, max: 0.10, step: 0.005, def: 0.04 },
+  { kind: 'fuelFilter',   label: 'Fuel filter clog',           family: 'component',  perCylinder: false, unit: '/min supply',    min: 0.02, max: 0.20, step: 0.01,  def: 0.06 },
+  { kind: 'chtSensor',    label: 'CHT sensor drift',           family: 'instrument', perCylinder: true,  unit: '°C/min',         min: 5,    max: 60,   step: 1,     def: 24 },
+  { kind: 'egtSensor',    label: 'EGT sensor drift',           family: 'instrument', perCylinder: true,  unit: '°C/min',         min: 10,   max: 150,  step: 5,     def: 70 },
+  { kind: 'mapSensor',    label: 'MAP sensor drift',           family: 'instrument', perCylinder: false, unit: 'hPa/min',        min: 5,    max: 60,   step: 1,     def: 20 },
+  { kind: 'lambdaSensor', label: 'λ sensor drift',             family: 'instrument', perCylinder: false, unit: '/min λ',         min: 0.005, max: 0.06, step: 0.005, def: 0.03 },
+  // Not in the classifier's training library on purpose — the novelty test.
+  { kind: 'unmodelled',   label: 'Propeller blade damage (outside the library)', family: 'unknown', perCylinder: false, unit: '/min C_P', min: 0.01, max: 0.10, step: 0.005, def: 0.04 },
 ];
 
 
@@ -62,6 +75,7 @@ export function FaultConsole() {
   const [kind, setKind] = useState<Kind>('injector');
   const [cyl, setCyl] = useState(1);
   const [rate, setRate] = useState(0.045);
+  const live = useMission((s) => s.source) === 'live';
   const [blindMode, setBlindMode] = useState(true);
 
   const def = KINDS.find((k) => k.kind === kind)!;
@@ -108,18 +122,25 @@ export function FaultConsole() {
       flag={isScript ? 'ok' : 'warn'}
     >
       <div className="fc-kinds">
-        {KINDS.map((k) => (
-          <button
-            key={k.kind}
-            className={`fc-kind fc-${k.family}${kind === k.kind ? ' fc-kind-on' : ''}`}
-            onClick={() => pick(k.kind)}
-          >
-            <span className="fc-fam">
-              {k.family === 'component' ? 'ENGINE' : k.family === 'instrument' ? 'SENSOR' : 'UNKNOWN'}
-            </span>
-            {k.label}
-          </button>
-        ))}
+        {KINDS.map((k) => {
+          // Reflects the ACTUAL running config, not the picker selection —
+          // a fault is "active" only once injected, not merely highlighted
+          // while the operator is still choosing severity/cylinder for it.
+          const active = Boolean((config as Record<string, unknown>)[k.kind]);
+          return (
+            <button
+              key={k.kind}
+              className={`fc-kind fc-${k.family}${kind === k.kind ? ' fc-kind-on' : ''}`}
+              onClick={() => pick(k.kind)}
+            >
+              <span className={`fc-dot${active ? ' fc-dot-active' : ''}`} />
+              <span className="fc-fam">
+                {k.family === 'component' ? 'ENGINE' : k.family === 'instrument' ? 'SENSOR' : 'UNKNOWN'}
+              </span>
+              {k.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Always rendered, disabled when the fault is not per-cylinder. If this
@@ -178,20 +199,43 @@ export function FaultConsole() {
       </div>
 
       <p className="note">
-        Runs the same physics, the same residual generator and the same diagnosis
-        code as the rehearsed demo — there is no separate sandbox mode. Faults
-        are injected as <strong>parameter changes</strong>, so the signatures
-        propagate on their own rather than being drawn.
+        {live ? (
+          <>
+            Injected into the <strong>engine model on the backend</strong> as a
+            parameter change. The diagnosis you see is computed from the
+            residuals alone — nothing on the backend that produces it can read
+            which fault was chosen.
+          </>
+        ) : (
+          <>
+            No backend connected: this runs the browser's local simulator, not
+            the engine model. Connect the live twin for the real pipeline.
+          </>
+        )}
       </p>
     </Panel>
   );
 }
 
 /** Shown after reveal, so the room can check the answer against the truth. */
+/**
+ * What was actually injected. Team-only: on a judge's screen it gives away the
+ * answer before the twin finds it, which is the one moment the demo exists
+ * for. Shown with ?team in the URL, toggled with G.
+ */
 export function InjectedTruth() {
   const config = useMission((s) => s.config);
   const blind = useMission((s) => s.blind);
-  if (blind) return null;
+  const [team, setTeam] = useState(() => new URLSearchParams(window.location.search).has('team'));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'g' || e.key === 'G') setTeam((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  if (blind || !team) return null;
 
   const entries = (Object.keys(config) as (keyof FaultConfig)[]).filter(
     (k) => k !== 'warmAirMass' && config[k]

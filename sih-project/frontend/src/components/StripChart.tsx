@@ -29,13 +29,32 @@ interface StripProps {
   pickPredicted?: (t: ReturnType<typeof useMission.getState>['ticks'][number]) => number[];
   unit: string;
   height?: number;
+  /** A real, sourced redline for this channel (from the active engine
+   *  profile's `limits[]` — never a literal invented for the chart). Omit
+   *  entirely for a channel with no sourced limit rather than guess one:
+   *  see engines.ts's own note that EGT has no limit row on this class. */
+  limit?: number;
+  limitLabel?: string;
+}
+
+/** Turns a solid stroke colour into a canvas gradient fading to transparent,
+ *  used as the series fill. Built once per draw call, not cached across
+ *  colours — uPlot's fill callback already runs once per series per redraw,
+ *  which at this data rate is negligible. */
+function fillFor(stroke: string) {
+  return (u: uPlot) => {
+    const grad = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+    grad.addColorStop(0, `${stroke}2e`);   // ~18% opacity at the line
+    grad.addColorStop(1, `${stroke}00`);   // transparent at the floor
+    return grad;
+  };
 }
 
 /** Seconds of history on screen. */
 const WINDOW = 120;
 
 export function StripChart({
-  title, subtitle, pick, pickPredicted, unit, height = 150,
+  title, subtitle, pick, pickPredicted, unit, height = 150, limit, limitLabel,
 }: StripProps) {
   const holder = useRef<HTMLDivElement>(null);
   const tooltip = useRef<HTMLDivElement>(null);
@@ -122,6 +141,7 @@ export function StripChart({
         stroke: CYL_COLOURS[i],
         width: 2,
         points: { show: false },
+        fill: fillFor(CYL_COLOURS[i]),
       })),
     ];
     if (pickPredicted) {
@@ -144,6 +164,37 @@ export function StripChart({
         points: { size: 7, width: 2, stroke: C.bg },
       },
       hooks: {
+        draw: limit == null ? [] : [
+          // A sourced redline, drawn once per frame after uPlot's own paint —
+          // never a client-side "safety limit" invented for the chart. Only
+          // wired where `limit` is passed a real value from the active
+          // engine profile's limits[] (see ChtChart below); channels with no
+          // sourced limit (EGT, on this class) get no line at all.
+          (u: uPlot) => {
+            const y = u.valToPos(limit, 'y', true);
+            if (y < u.bbox.top || y > u.bbox.top + u.bbox.height) return;
+            const ctx = u.ctx;
+            ctx.save();
+            ctx.strokeStyle = C.alert;
+            ctx.globalAlpha = 0.55;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(u.bbox.left, y);
+            ctx.lineTo(u.bbox.left + u.bbox.width, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = C.alert;
+            ctx.font = '10.5px ui-monospace, Menlo, monospace';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(
+              `${limitLabel ?? 'limit'} ${limit}${unit}`,
+              u.bbox.left + 4, y - 3,
+            );
+            ctx.restore();
+          },
+        ],
         // A judge who has never seen a strip chart before gets nothing from
         // four unlabelled colored lines. Pointing at any moment now reads
         // every cylinder's exact value at once — the tooltip is the real
@@ -270,7 +321,7 @@ export function StripChart({
       plot.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height, hasPred]);
+  }, [height, hasPred, limit, limitLabel]);
 
   return (
     <Panel title={title} subtitle={subtitle ?? unit}>
@@ -321,6 +372,9 @@ export function EgtChart() {
 }
 
 export function ChtChart() {
+  // Sourced from the active engine profile's own limits[], never a literal
+  // here — switching engines (VRDE 200°C vs Rotax 135°C) moves the line.
+  const chtLimit = useMission((s) => s.engine.limits.find((l) => l.key === 'cht'));
   return (
     <StripChart
       title="Cylinder head temperature"
@@ -329,6 +383,8 @@ export function ChtChart() {
       pickPredicted={(t) => t.predicted.cht_C}
       unit="°C"
       height={165}
+      limit={chtLimit?.limit}
+      limitLabel={chtLimit?.label}
     />
   );
 }

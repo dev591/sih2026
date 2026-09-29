@@ -6,9 +6,9 @@
  * into a capability.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMission, MISSION_DURATION_S, type Drawer } from '../state/missionStore';
-import { SCRIPT_BEATS, SCRIPTED } from '../mock/missionGenerator';
+import { computeScriptBeats, SCRIPTED, type ScriptBeat } from '../mock/missionGenerator';
 
 export function Scrubber() {
   const index = useMission((s) => s.index);
@@ -23,6 +23,8 @@ export function Scrubber() {
   const startProgress = useMission((s) => s.startProgress);
   const startEngine = useMission((s) => s.startEngine);
   const stopEngine = useMission((s) => s.stopEngine);
+  const ticks = useMission((s) => s.ticks);
+  const beats = useMemo(() => computeScriptBeats(ticks), [ticks]);
   const jumpTo = useBeatJump();
 
   const raf = useRef<number>(0);
@@ -96,13 +98,13 @@ export function Scrubber() {
         {/* scripted beats as ticks on the timeline — so nobody has to remember
             when the interesting things happen during a live demo */}
         <div className="beats">
-          {SCRIPT_BEATS.map((b) => (
+          {beats.map((b) => (
             <button
-              key={b.t}
+              key={b.label}
               className="beat"
               style={{ left: `${(b.t / MISSION_DURATION_S) * 100}%` }}
-              title={`${b.label} — jump to ${b.t}s`}
-              onClick={() => jumpTo(b.t)}
+              title={`${b.label} — jump to ${b.t.toFixed(0)}s`}
+              onClick={() => jumpTo(b)}
             />
           ))}
         </div>
@@ -138,29 +140,30 @@ export function Scrubber() {
  *
  * In simple mode the panels are behind edge tabs, so jumping to a beat has to
  * bring up whatever that beat's narration points at — otherwise the presenter
- * is hunting for a tab mid-sentence. Keyed by beat TIME rather than by index so
- * it cannot silently fall out of step with SCRIPT_BEATS the way a parallel
- * array would; beats not listed want the bare engine, which is the point of
- * beats 1 and 2.
+ * is hunting for a tab mid-sentence. Keyed by LABEL, not by time: detection
+ * beats are now computed from the actual mission (see computeScriptBeats)
+ * and land at a different second every run, but the label text itself is
+ * fixed regardless of when it fires. Beats not listed want the bare engine,
+ * which is the point of beats 1 and 2.
  *
- * Follows docs/pitch/demo-script.md — 1:20 isolation, 2:25 the decision, 3:00
- * the sensor-drift twist where the argument is the ABSENCE of corroborating
+ * Follows docs/pitch/demo-script.md — isolation, the decision, the
+ * sensor-drift twist where the argument is the ABSENCE of corroborating
  * residuals, so that one opens the residual heatmap.
  */
-const BEAT_DRAWER: Record<number, Drawer> = {
-  62: 'faults',    // anomaly crosses, every limit still green
-  95: 'faults',    // isolation: injector fouling, cyl 2
-  120: 'mission',  // warm air mass — cross-engine differential
-  140: 'mission',  // RUL with uncertainty band
-  165: 'mission',  // continue / derate / RTB — the judge drags the altitude
-  200: 'trends',   // CHT sensor drifting; watch the residuals NOT move
-  235: 'faults',   // sensor fault correctly identified
-  260: 'trends',   // unmodelled — twin confidence drops
+const BEAT_DRAWER: Record<string, Drawer> = {
+  'Anomaly score crosses threshold': 'faults',
+  [`Isolation: injector fouling, cyl ${1}`]: 'faults',
+  'Warm air mass — BOTH engines rise, differential does not': 'mission',
+  'RUL with uncertainty band': 'mission',
+  'Mission decision: continue / derate / RTB': 'mission',
+  [`CHT sensor ${3} begins drifting — ENGINE IS HEALTHY`]: 'trends',
+  'Sensor fault correctly identified': 'faults',
+  'UNMODELLED fault — the twin says "I do not know"': 'trends',
 };
 
 /**
  * Jump to a scripted beat. Shared by the chips and by the timeline ticks,
- * because they are the same ten beats and it would be its own small trap for
+ * because they are the same beats and it would be its own small trap for
  * one of them to open the drawer and the other not to.
  */
 function useBeatJump() {
@@ -168,10 +171,10 @@ function useBeatJump() {
   const setDrawer = useMission((s) => s.setDrawer);
   const simple = useMission((s) => s.mode === 'simple');
   return useCallback(
-    (t: number) => {
-      setIndex(t);
+    (b: ScriptBeat) => {
+      setIndex(b.t);
       // Only in simple mode — the expert grid already has every panel on screen.
-      if (simple) setDrawer(BEAT_DRAWER[t] ?? null);
+      if (simple) setDrawer(BEAT_DRAWER[b.label] ?? null);
     },
     [setIndex, setDrawer, simple]
   );
@@ -180,6 +183,9 @@ function useBeatJump() {
 export function BeatBar() {
   const index = useMission((s) => s.index);
   const onScript = useMission((s) => s.config === SCRIPTED);
+  const healthy = useMission((s) => Object.keys(s.config).length === 0);
+  const ticks = useMission((s) => s.ticks);
+  const beats = useMemo(() => computeScriptBeats(ticks), [ticks]);
   const jumpTo = useBeatJump();
 
   useEffect(() => {
@@ -187,17 +193,39 @@ export function BeatBar() {
       if (e.target instanceof HTMLInputElement) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
-      if (Number.isInteger(n) && n >= 1 && n <= SCRIPT_BEATS.length) {
+      if (Number.isInteger(n) && n >= 1 && n <= beats.length) {
         e.preventDefault();
-        jumpTo(SCRIPT_BEATS[n - 1].t);
+        jumpTo(beats[n - 1]);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [jumpTo]);
+  }, [jumpTo, beats]);
+
+  // ?beat=N opens straight at a scripted beat, for rehearsal and for
+  // capturing a specific moment without clicking through the mission.
+  useEffect(() => {
+    const n = Number(new URLSearchParams(window.location.search).get('beat'));
+    if (Number.isInteger(n) && n >= 1 && n <= beats.length) {
+      const id = setTimeout(() => jumpTo(beats[n - 1]), 400);
+      return () => clearTimeout(id);
+    }
+  }, [jumpTo, beats]);
 
   // The beats describe the rehearsed mission. In the sandbox they refer to
   // events that are not in the timeline, so showing them would be a lie.
+  if (!onScript && healthy) {
+    return (
+      <div className="beat-bar beat-bar-sandbox">
+        <span className="sandbox-tag">HEALTHY</span>
+        <span className="sandbox-note">
+          No fault injected — the engine is running clean. Inject a fault from
+          the console, or use <strong>Demo script</strong> for the rehearsed mission.
+        </span>
+      </div>
+    );
+  }
+
   if (!onScript) {
     return (
       <div className="beat-bar beat-bar-sandbox">
@@ -213,20 +241,20 @@ export function BeatBar() {
 
   return (
     <div className="beat-bar">
-      {SCRIPT_BEATS.map((b, i) => {
-        const next = SCRIPT_BEATS[i + 1]?.t ?? MISSION_DURATION_S;
+      {beats.map((b, i) => {
+        const next = beats[i + 1]?.t ?? MISSION_DURATION_S;
         const active = index >= b.t && index < next;
         return (
           <button
-            key={b.t}
+            key={b.label}
             className={`beat-chip${active ? ' beat-chip-on' : ''}`}
-            onClick={() => jumpTo(b.t)}
+            onClick={() => jumpTo(b)}
             title={`Press ${i + 1} to jump here`}
           >
             <span className="beat-key">{i + 1}</span>
             <span className="beat-body">
               <span className="beat-time">
-                {Math.floor(b.t / 60)}:{(b.t % 60).toString().padStart(2, '0')}
+                {Math.floor(b.t / 60)}:{Math.floor(b.t % 60).toString().padStart(2, '0')}
               </span>
               <span className="beat-label">{b.label}</span>
             </span>

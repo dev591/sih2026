@@ -19,7 +19,7 @@ const INCIDENCE: Partial<Record<FaultId, number[]>> = {
   turbo_degradation:   [-2,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0],
   injector_fouling:    [ 0, -2,  0,  1,  0,  2,  2,  2,  2,  0,  2],
   fuel_filter_clog:    [ 0, -2,  0,  1, -1,  0,  0,  0,  0,  0,  0],
-  ignition_misfire:    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
+  injection_misfire:    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
   cooling_fouling:     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
   oil_pump_wear:       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
   bearing_wear:        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],
@@ -28,6 +28,32 @@ const INCIDENCE: Partial<Record<FaultId, number[]>> = {
   egt_sensor_drift:    [ 0,  0,  0,  1,  0,  2,  2,  2,  2,  0,  0],
   cht_sensor_drift:    [ 0,  0,  0,  0,  0,  2,  2,  2,  2,  0,  0],
   lambda_sensor_drift: [ 0,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+};
+
+/** Plain names for the live feature vector (ml/features.py on the backend). */
+const FEATURE_LABELS: Record<string, string> = {
+  rho1: 'ρ₁  air: speed-density vs compressor',
+  rho2: 'ρ₂  air: speed-density vs fuel/λ',
+  rho4: 'ρ₄  energy closure',
+  rho5: 'ρ₅  power closure',
+  rho10: 'ρ₁₀ oil pressure model',
+  rho11: 'ρ₁₁ 0.5-order crank ripple',
+  egt_dev_1: 'EGT deviation · cyl 1', egt_dev_2: 'EGT deviation · cyl 2',
+  egt_dev_3: 'EGT deviation · cyl 3', egt_dev_4: 'EGT deviation · cyl 4',
+  cht_dev_1: 'CHT deviation · cyl 1', cht_dev_2: 'CHT deviation · cyl 2',
+  cht_dev_3: 'CHT deviation · cyl 3', cht_dev_4: 'CHT deviation · cyl 4',
+  coolant: 'Coolant temperature vs twin',
+  head_mean: 'Mean head temperature vs twin',
+  egt_mean: 'Mean EGT vs twin',
+  oil_temp: 'Oil temperature vs twin',
+  fuel_delivery: 'Metered fuel vs FADEC command',
+  boost_path: 'Intercooler pressure drop vs twin',
+};
+
+/** Glyph for a measured (continuous) signature entry, relative to its row max. */
+const glyph = (v: number, max: number) => {
+  const r = max > 0 ? v / max : 0;
+  return r > 0.4 ? 2 : r > 0.15 ? 1 : r < -0.4 ? -2 : r < -0.15 ? -1 : 0;
 };
 
 const SIGN = (v: number) =>
@@ -42,16 +68,30 @@ export function ExplainDrawer() {
 
   if (!open) return null;
 
-  const { diagnosis, rho } = tick.health;
+  const { diagnosis, rho, explain } = tick.health;
   const top = diagnosis.top[0];
-  const values = residualRow(rho);
-  const signature = INCIDENCE[top.fault] ?? new Array(11).fill(0);
 
+  // LIVE: the backend's evidence and the fault's MEASURED signature. SIMULATED:
+  // the local simulator's residuals against the local table.
+  type Row = { key: string; label: string; detail: string; v: number; expected: number };
+  let rows: Row[];
+  if (explain) {
+    const max = Math.max(...explain.signature.map(Math.abs));
+    rows = explain.features.map((f, i) => ({
+      key: f, label: FEATURE_LABELS[f] ?? f, detail: 'measured on the engine model',
+      v: explain.live[i], expected: glyph(explain.signature[i], max),
+    }));
+  } else {
+    const values = residualRow(rho);
+    const signature = INCIDENCE[top.fault] ?? new Array(11).fill(0);
+    rows = values.flatMap((v, i) => v === null ? [] : [{
+      key: RESIDUAL_ROWS[i].key, label: RESIDUAL_ROWS[i].label,
+      detail: RESIDUAL_ROWS[i].detail, v, expected: signature[i],
+    }]);
+  }
+  const values = residualRow(rho);
   // Which residuals are actually carrying the diagnosis right now.
-  const ranked = values
-    .map((v, i) => ({ i, v: v ?? 0, available: v !== null, expected: signature[i] }))
-    .filter((r) => r.available)
-    .sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  const ranked = rows.sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, explain ? 12 : rows.length);
 
   const isSensor = diagnosis.is_sensor_fault;
   const corroborating = ranked.filter((r) => Math.abs(r.v) > 1.5).length;
@@ -62,11 +102,11 @@ export function ExplainDrawer() {
         <div>
           <div className="drawer-title">Why this diagnosis</div>
           <div className={`drawer-fault tone-${isSensor ? 'sensor' : 'alert'}`}>
-            {FAULT_LABELS[top.fault]}
+            {diagnosis.unavailable ? 'No diagnosis — ML layer offline' : FAULT_LABELS[top.fault]}
             {/* Loose check: a producer that omits `cylinder` gives undefined,
                 and undefined !== null renders "cylinder NaN". */}
-            {top.cylinder != null && ` · cylinder ${top.cylinder + 1}`}
-            <span className="drawer-conf">{(top.p * 100).toFixed(0)}%</span>
+            {!diagnosis.unavailable && top.cylinder != null && ` · cylinder ${top.cylinder + 1}`}
+            {!diagnosis.unavailable && <span className="drawer-conf">{(top.p * 100).toFixed(0)}%</span>}
           </div>
         </div>
         <button className="drawer-close" onClick={() => { setOpen(false); selectCyl(null); }}>✕</button>
@@ -86,17 +126,20 @@ export function ExplainDrawer() {
           ) : (
             <>
               <strong>{corroborating} residuals moved together, in a coupled pattern.</strong>
-              A single sensor cannot produce this. The excitation set matches the
-              derived signature row below — and the classifier independently
-              agrees. Two mechanisms, one answer.
+              A single sensor cannot produce this.{' '}
+              {explain
+                ? <>The pattern matches this fault's signature <em>measured on the engine model</em> (cosine {explain.match_cosine.toFixed(2)}).</>
+                : <>The excitation set matches the derived signature row below.</>}
             </>
           )}
         </div>
 
-        <div className="drawer-section">Residual contributions · live vs derived signature</div>
+        <div className="drawer-section">
+          Residual contributions · live vs {explain ? 'measured' : 'derived'} signature
+        </div>
         <div className="contrib">
           {ranked.map((r) => {
-            const meta = RESIDUAL_ROWS[r.i];
+            const meta = r;
             const mag = Math.min(1, Math.abs(r.v) / 4);
             const agrees = Math.sign(r.v) === Math.sign(r.expected) && r.expected !== 0;
             return (
@@ -149,8 +192,8 @@ export function ExplainDrawer() {
               <div><span>twin says</span><strong>{tick.predicted.egt_C[selected].toFixed(0)} °C</strong></div>
               <div><span>CHT</span><strong>{tick.slow.cht_C[selected].toFixed(1)} °C</strong></div>
               <div><span>twin says</span><strong>{tick.predicted.cht_C[selected].toFixed(1)} °C</strong></div>
-              <div><span>C_d inj</span><strong>{(tick.health.theta?.cd_inj?.value?.[selected] ?? 1.0).toFixed(3)}</strong></div>
-              <div><span>comb. η</span><strong>{(tick.health.virtual.comb_efficiency[selected] * 100).toFixed(1)} %</strong></div>
+              <div><span>C_d inj (estimated)</span><strong>{tick.health.theta ? tick.health.theta.cd_inj.value[selected].toFixed(3) : '—'}</strong></div>
+              <div><span>comb. η</span><strong title="Not modelled">{tick.health.virtual.comb_efficiency ? `${(tick.health.virtual.comb_efficiency[selected] * 100).toFixed(1)} %` : 'not modelled'}</strong></div>
             </div>
           </>
         )}

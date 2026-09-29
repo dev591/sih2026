@@ -56,7 +56,8 @@ const ROUTE: Leg[] = [
   { s: 1.00, x: 30, y: 160, label: 'BASE' },
 ];
 
-function riskColour(p: number): string {
+function riskColour(p: number | null): string {
+  if (p == null) return 'var(--line-2)';
   // p is probability of completing THIS segment within limits.
   if (p > 0.95) return C.ok;
   if (p > 0.85) return '#65a30d';
@@ -68,7 +69,7 @@ export function MissionMap() {
   const tick = useCurrentTick();
   const engine = useMission((s) => s.engine);
   const setAltitude = useMission((s) => s.setAltitude);
-  const { mission, rul, virtual } = tick.health;
+  const { mission } = tick.health;
   const baseAlt = tick.slow.altitude_ft;
 
   /** What the operator is proposing, not what the aircraft is doing. */
@@ -78,43 +79,41 @@ export function MissionMap() {
   const alt = Math.round(proposedAlt ?? baseAlt);
   const dragged = proposedAlt !== null && Math.abs(proposedAlt - baseAlt) > 100;
 
-  // ---- how altitude changes the numbers -----------------------------------
-  // Above critical altitude the turbocharger can no longer hold rated manifold
-  // pressure, so the compressor is the binding constraint on available power
-  // and any compressor degradation becomes mission-limiting. Below it, the
-  // engine is working less hard and damage accrues more slowly.
   const CRITICAL_FT = engine.criticalAltitude_ft;
-  const overCritical = Math.max(0, alt - CRITICAL_FT) / 1000;
-  const baseOver = Math.max(0, baseAlt - CRITICAL_FT) / 1000;
-
-  const altPenalty = (overCritical - baseOver) * 0.021;
-  const pContinue = Math.max(0.05, Math.min(0.995, mission.p_complete_continue - altPenalty));
-  const pDerate = Math.max(0.05, Math.min(0.999, mission.p_complete_derate - altPenalty * 0.45));
-
-  // Lower and slower burns less fuel per hour but takes longer on station.
-  const enduranceShift = -(overCritical - baseOver) * 4.5;
+  // Both straight from the backend's Monte Carlo. This panel used to subtract
+  // its own invented altitude penalty (0.021 per 1,000 ft) and colour the
+  // route with an invented decay curve — numbers no model had produced. A
+  // proposed altitude is now only a proposal: committing it flies the twin
+  // there, and the backend recomputes.
+  const pContinue = mission.p_complete_continue;
+  const pDerate = mission.p_complete_derate;
+  const survival = mission.survival_continue;
 
   const segments = useMemo(() => {
-    const out: { d: string; p: number; s: number }[] = [];
+    const out: { d: string; p: number | null; s: number }[] = [];
+    const flown = ROUTE[3].s;          // the aircraft marker sits here
     for (let i = 1; i < ROUTE.length; i++) {
       const a = ROUTE[i - 1];
       const b = ROUTE[i];
-      // Risk grows along the route as damage accumulates: a segment flown in
-      // four hours' time is flown by a more degraded engine than this one.
-      const t = b.s;
-      const decay = Math.pow(pContinue, 0.4 + t * 1.6);
-      out.push({ d: `M${a.x},${a.y} L${b.x},${b.y}`, p: decay, s: t });
+      let p: number | null = null;
+      if (b.s <= flown) p = 1;         // already flown
+      else if (survival && survival.length) {
+        // Fraction of the remaining mission this segment ends at, looked up
+        // on the served survival curve (sampled at 10 %, 20 % … 100 %).
+        const f = (b.s - flown) / (1 - flown);
+        p = survival[Math.min(survival.length - 1, Math.max(0, Math.ceil(f * survival.length) - 1))];
+      } else p = pContinue;
+      out.push({ d: `M${a.x},${a.y} L${b.x},${b.y}`, p, s: b.s });
     }
     return out;
-  }, [pContinue]);
+  }, [survival, pContinue]);
 
-  // Point of no return, as a fraction along the route.
+  // Point of no return along the route: served time-to-fuel-reserve, laid
+  // along the remaining route in proportion to the 3 h assumed fuel load.
   const pnrFrac = useMemo(() => {
-    const hoursLeft = Math.max(0.1, rul.reported_h);
-    // Degraded bsfc stretches fuel burn, pulling the PNR earlier.
-    const bsfcPenalty = Math.min(0.35, Math.max(0, (virtual.bsfc_g_per_kWh - 240) / 240));
-    return Math.max(0.05, Math.min(0.95, 0.62 - bsfcPenalty + Math.min(0.2, hoursLeft / 40)));
-  }, [rul.reported_h, virtual.bsfc_g_per_kWh]);
+    const flown = ROUTE[3].s;
+    return Math.max(0.05, Math.min(0.95, flown + (mission.point_of_no_return_s / 10800) * (1 - flown)));
+  }, [mission.point_of_no_return_s]);
 
   const pnrPoint = useMemo(() => {
     for (let i = 1; i < ROUTE.length; i++) {
@@ -132,7 +131,7 @@ export function MissionMap() {
     <Panel
       title="Mission risk"
       subtitle="route by predicted risk · drag the altitude"
-      flag={pContinue > 0.9 ? 'ok' : pContinue > 0.75 ? 'warn' : 'alert'}
+      flag={pContinue == null ? undefined : pContinue > 0.9 ? 'ok' : pContinue > 0.75 ? 'warn' : 'alert'}
     >
       <svg viewBox={`0 0 ${W} ${H}`} className="mapsvg" role="img" aria-label="Mission route coloured by predicted risk">
         <defs>
@@ -199,16 +198,16 @@ export function MissionMap() {
 
       <div className="opt-list" style={{ marginTop: 10 }}>
         <div className="opt">
-          <span className="opt-bar" style={{ width: `${pContinue * 100}%` }} />
-          <span className="opt-label">Continue at {alt.toLocaleString()} ft</span>
-          <span className="opt-cost">{dragged ? `${enduranceShift >= 0 ? '+' : ''}${enduranceShift.toFixed(0)} min endurance` : '—'}</span>
-          <span className="opt-p">{(pContinue * 100).toFixed(0)}%</span>
+          <span className="opt-bar" style={{ width: `${(pContinue ?? 0) * 100}%` }} />
+          <span className="opt-label">Continue at {Math.round(baseAlt).toLocaleString()} ft</span>
+          <span className="opt-cost">{dragged ? 'commit the climb to recompute' : '—'}</span>
+          <span className="opt-p">{pContinue == null ? '—' : `${(pContinue * 100).toFixed(0)}%`}</span>
         </div>
         <div className="opt opt-rec">
-          <span className="opt-bar" style={{ width: `${pDerate * 100}%` }} />
+          <span className="opt-bar" style={{ width: `${(pDerate ?? 0) * 100}%` }} />
           <span className="opt-label">Derate to 78% power</span>
-          <span className="opt-cost">−{mission.derate_cost_min_on_station} min on station</span>
-          <span className="opt-p">{(pDerate * 100).toFixed(0)}%</span>
+          <span className="opt-cost">{mission.derate_cost_min_on_station == null ? 'station cost not modelled' : `−${mission.derate_cost_min_on_station} min on station`}</span>
+          <span className="opt-p">{pDerate == null ? '—' : `${(pDerate * 100).toFixed(0)}%`}</span>
         </div>
       </div>
 

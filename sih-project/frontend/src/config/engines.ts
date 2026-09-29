@@ -20,6 +20,25 @@
 
 export type Provenance = 'published' | 'derived' | 'assumed';
 
+/**
+ * What the machine physically IS. Drives the 3D model, so switching profile
+ * builds a different engine rather than recolouring one: the old model drew
+ * finned air-cooled barrels for both, which is wrong in cooling for the VRDE
+ * and wrong in layout for the Rotax.
+ */
+export interface EngineArchitecture {
+  layout: 'inline' | 'boxer';
+  cooling: 'liquid' | 'liquid_heads_air_barrels';
+  fuelSystem: 'common_rail' | 'carburettor';
+  valvetrain: 'dohc_4v' | 'ohv_2v';
+  /** 1-indexed cylinder numbers in firing order. */
+  firingOrder: number[];
+  /** Render-only: not published for either engine, and never used by physics. */
+  rodLength_m: number;
+  boreSpacing_m: number;
+  provenance: Provenance;
+}
+
 export interface LimitDef {
   key: string;
   label: string;
@@ -50,6 +69,8 @@ export interface EngineProfile {
    * field is what keeps the two in step, per the note at the top of the file.
    */
   geometryProvenance: Provenance;
+
+  architecture: EngineArchitecture;
 
   cylinders: number;
   displacement_m3: number;
@@ -115,6 +136,21 @@ export const VRDE_180: EngineProfile = {
   // bore/stroke are assumed. Mirrors `geometry: provenance: unverified_community`
   // in config/engine_vrde_180.yaml. See docs/research/VRDE-PUBLIC-DOSSIER.md.
   geometryProvenance: 'assumed',
+
+  // Liquid cooling is the VRDE's own spec (the backend models its coolant
+  // loop, thermostat, radiator and intercooler). Inline-4, common rail and
+  // DOHC 16-valve follow the mHawk base block — the same community claim as
+  // the displacement, hence 'assumed'.
+  architecture: {
+    layout: 'inline',
+    cooling: 'liquid',
+    fuelSystem: 'common_rail',
+    valvetrain: 'dohc_4v',
+    firingOrder: [1, 3, 4, 2],
+    rodLength_m: 0.152,
+    boreSpacing_m: 0.096,
+    provenance: 'assumed',
+  },
 
   cylinders: 4,
   displacement_m3: 2.179e-3,
@@ -189,6 +225,19 @@ export const ROTAX_914: EngineProfile = {
   fuel: 'AVGAS 100LL',
   provenance: 'published',
   geometryProvenance: 'published',   // real Rotax 914 spec, unlike the VRDE
+
+  // Horizontally opposed, liquid-cooled heads on air-cooled finned barrels,
+  // twin carburettors, pushrod OHV: the published Rotax 91x configuration.
+  architecture: {
+    layout: 'boxer',
+    cooling: 'liquid_heads_air_barrels',
+    fuelSystem: 'carburettor',
+    valvetrain: 'ohv_2v',
+    firingOrder: [1, 4, 2, 3],
+    rodLength_m: 0.1025,
+    boreSpacing_m: 0.108,
+    provenance: 'published',
+  },
 
   cylinders: 4,
   displacement_m3: 1.2114e-3,

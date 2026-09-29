@@ -162,7 +162,21 @@ export function DiagnosisPanel() {
   // The healthy row's probability is not a confidence: the ML path reports
   // 1 − score/threshold, the physics-only fallback a fixed 0.98. Derive the
   // margin here so it means the same thing on both paths.
-  const alarmMargin = Math.min(1, Math.max(0, 1 - anomaly.score / anomaly.threshold));
+  const alarmMargin = anomaly.score != null && anomaly.threshold
+    ? Math.min(1, Math.max(0, 1 - anomaly.score / anomaly.threshold))
+    : 0;
+
+  if (diagnosis.unavailable) {
+    return (
+      <Panel title="Diagnosis" subtitle="ML layer offline" flag="alert">
+        <div className="callout callout-alert">
+          <strong>No diagnosis this frame.</strong>
+          The anomaly and isolation models did not run, so nothing is shown in
+          their place. The threshold monitor below still works on its own.
+        </div>
+      </Panel>
+    );
+  }
 
   return (
     <Panel
@@ -184,6 +198,15 @@ export function DiagnosisPanel() {
           <div className="diag-conf">{(top.p * 100).toFixed(0)}%</div>
         )}
       </div>
+
+      {diagnosis.inseparable_from && diagnosis.inseparable_from.length > 0 && (
+        <div className="callout callout-probe">
+          <strong>Cannot yet be separated from {diagnosis.inseparable_from.map((f) => FAULT_LABELS[f]).join(', ')}.</strong>
+          On held-out engines these faults produced residual signatures the
+          current sensor set measurably cannot tell apart. Both are reported
+          rather than one being picked.
+        </div>
+      )}
 
       {diagnosis.is_sensor_fault && (
         <div className="callout callout-sensor">
@@ -228,10 +251,10 @@ export function DiagnosisPanel() {
       <div className="metric-grid">
         <Metric
           label="Anomaly score"
-          value={anomaly.score.toFixed(3)}
+          value={anomaly.score == null ? '—' : anomaly.score.toFixed(3)}
           tone={anomaly.persistence.met ? 'alert' : 'ok'}
         />
-        <Metric label="Threshold" value={anomaly.threshold.toFixed(3)} tone="dim" />
+        <Metric label="Threshold" value={anomaly.threshold == null ? '—' : anomaly.threshold.toFixed(3)} tone="dim" />
         <Metric
           label="Windows over threshold"
           value={`${anomaly.persistence.n}/${anomaly.persistence.of}`}
@@ -260,26 +283,29 @@ export function DiagnosisPanel() {
 // ---------------------------------------------------------------------------
 export function HealthParamsPanel() {
   const { theta } = useCurrentTick().health;
-
   if (!theta) {
     return (
-      <Panel title="Health parameters" subtitle="UKF joint state–parameter estimate">
-        <div className="param-list">
-          <div className="param"><span className="param-label" style={{opacity:0.5}}>UKF unavailable — ML pipeline not loaded</span></div>
-        </div>
+      <Panel title="Health parameters" subtitle="ML layer offline">
+        <div className="rul-none">No estimate this frame</div>
       </Panel>
     );
   }
 
+  const opt = (label: string, e?: { value: number; sigma: number }) =>
+    e ? [{ label, v: e.value, s: e.sigma }] : [];
   const rows: { label: string; v: number; s: number }[] = [
     { label: 'Volumetric efficiency scale  η_v', v: theta.eta_v_scale.value, s: theta.eta_v_scale.sigma },
     { label: 'Compressor efficiency scale  η_c', v: theta.eta_c_scale.value, s: theta.eta_c_scale.sigma },
-    { label: 'Cooling effectiveness  (hA)', v: theta.hA_scale.value, s: theta.hA_scale.sigma },
+    { label: 'Head cooling conductance  (hA)', v: theta.hA_scale.value, s: theta.hA_scale.sigma },
     { label: 'Friction scale  f_fric', v: theta.f_fric_scale.value, s: theta.f_fric_scale.sigma },
+    ...opt('Radiator effectiveness', theta.rad_eff_scale),
+    ...opt('Coolant pump flow', theta.cool_pump_scale),
+    ...opt('Oil pump delivery', theta.oil_pump_scale),
+    ...opt('Fuel supply (filter)', theta.fuel_rail_scale),
   ];
 
   return (
-    <Panel title="Health parameters" subtitle="UKF joint state–parameter estimate">
+    <Panel title="Health parameters" subtitle="Kalman filter on a measured engine-model sensitivity">
       <div className="param-list">
         {rows.map((r) => {
           const dev = Math.abs(1 - r.v);
@@ -326,14 +352,30 @@ export function RulPanel() {
       </Panel>
     );
   }
-
-  const span = Math.max(rul.p90_h - rul.p10_h, 0.01);
-  const pos = (v: number) => ((v - rul.p10_h) / span) * 100;
+  const label = FAULT_LABELS[rul.component as keyof typeof FAULT_LABELS] ?? rul.component;
+  if (rul.reported_h == null || rul.p10_h == null || rul.p50_h == null || rul.p90_h == null) {
+    return (
+      <Panel title="Remaining useful life" subtitle={label}>
+        <div className="rul-none">No redline predicted yet</div>
+        <Note>
+          The fault is diagnosed, but at its current estimated rate the engine
+          model predicts no limit exceedance inside the fault's modelled range —
+          or there is not yet enough trend history to fit a rate.
+        </Note>
+      </Panel>
+    );
+  }
+  // Demo fault rates are compressed into minutes; show minutes below an hour
+  // rather than rounding a real 20-minute estimate to "0.3 h".
+  const fmt = (h: number | null) => (h == null ? '—' : h < 1 ? (h * 60).toFixed(0) : h.toFixed(1));
+  const unit = rul.reported_h < 1 ? 'min' : 'h';
+  const span = Math.max(rul.p90_h - rul.p10_h, 1e-3);
+  const pos = (v: number) => ((v - (rul.p10_h ?? 0)) / span) * 100;
 
   return (
-    <Panel title="Remaining useful life" subtitle={rul.component} flag={rul.reported_h < 4 ? 'warn' : 'ok'}>
+    <Panel title="Remaining useful life" subtitle={`${label} · time to first redline`} flag={rul.reported_h < 4 ? 'warn' : 'ok'}>
       <div className="rul-big">
-        {rul.reported_h.toFixed(1)}<span className="rul-unit">h</span>
+        {fmt(rul.reported_h)}<span className="rul-unit">{unit}</span>
       </div>
       <div className="rul-band">
         <div className="rul-track">
@@ -341,23 +383,19 @@ export function RulPanel() {
           <div className="rul-marker" style={{ left: `${pos(rul.p50_h)}%` }} />
         </div>
         <div className="rul-ticks">
-          <span>p10 {rul.p10_h.toFixed(1)}h</span>
-          <span>p50 {rul.p50_h.toFixed(1)}h</span>
-          <span>p90 {rul.p90_h.toFixed(1)}h</span>
+          <span>p10 {fmt(rul.p10_h)}{unit}</span>
+          <span>p50 {fmt(rul.p50_h)}{unit}</span>
+          <span>p90 {fmt(rul.p90_h)}{unit}</span>
         </div>
       </div>
       <div className="metric-grid">
-        <Metric label="Physics head" value={rul.physics_h === null ? '—' : rul.physics_h.toFixed(1)} unit="h" />
-        <Metric label="Network head" value={rul.network_h.toFixed(1)} unit="h" />
-        <Metric
-          label="Advised on"
-          value={rul.reported_h.toFixed(1)}
-          unit="h"
-          tone="warn"
-        />
+        <Metric label="Physics head (Kalman θ)" value={fmt(rul.physics_h)} unit={unit} />
+        <Metric label="Network head (M3)" value={fmt(rul.network_h)} unit={unit} />
+        <Metric label="Advised on" value={fmt(rul.reported_h)} unit={unit} tone="warn" />
       </div>
       <Note>
-        Two independent estimates, and we advise on the conservative one.
+        Two independent estimates of the time until the engine model predicts a
+        limit exceedance, and we advise on the conservative one.
         {rul.heads_disagree && ' Heads disagree beyond the predictive interval — surfaced as a warning in its own right.'}
       </Note>
     </Panel>
@@ -372,9 +410,11 @@ export function MissionPanel() {
 
   const options = [
     { key: 'continue', label: 'Continue', p: mission.p_complete_continue, cost: '—' },
-    { key: 'derate', label: 'Derate to 78% power', p: mission.p_complete_derate, cost: `−${mission.derate_cost_min_on_station} min on station` },
+    { key: 'derate', label: 'Derate to 78% power', p: mission.p_complete_derate,
+      cost: mission.derate_cost_min_on_station == null ? 'station cost not modelled' : `−${mission.derate_cost_min_on_station} min on station` },
     { key: 'rtb', label: 'Return to base', p: mission.p_complete_rtb, cost: 'mission ends' },
   ];
+  const pct = (p: number | null) => (p == null ? '—' : `${(p * 100).toFixed(0)}%`);
 
   const pnrMin = Math.max(0, mission.point_of_no_return_s / 60);
 
@@ -383,28 +423,24 @@ export function MissionPanel() {
       <div className="opt-list">
         {options.map((o) => (
           <div className={`opt${mission.recommended === o.key ? ' opt-rec' : ''}`} key={o.key}>
-            <span className="opt-bar" style={{ width: `${o.p * 100}%` }} />
+            <span className="opt-bar" style={{ width: `${(o.p ?? 0) * 100}%` }} />
             <span className="opt-label">{o.label}</span>
             <span className="opt-cost">{o.cost}</span>
-            <span className="opt-p">{(o.p * 100).toFixed(0)}%</span>
+            <span className="opt-p">{pct(o.p)}</span>
           </div>
         ))}
       </div>
       <div className="metric-grid">
         <Metric label="Point of no return" value={pnrMin.toFixed(0)} unit="min" tone={pnrMin < 40 ? 'warn' : 'ok'} />
-        <Metric label="Boost ceiling" value={mission.recommended_boost_hPa.toFixed(0)} unit="hPa" />
-        <Metric label="Power ceiling" value={mission.recommended_power_pct.toFixed(0)} unit="%" />
+        <Metric label="Boost ceiling" value={mission.recommended_boost_hPa == null ? '—' : mission.recommended_boost_hPa.toFixed(0)} unit="hPa" />
+        <Metric label="Power ceiling" value={mission.recommended_power_pct == null ? '—' : mission.recommended_power_pct.toFixed(0)} unit="%" />
       </div>
       <Note>
-        Point of no return integrates the twin's own live fuel flow against
-        a mission fuel budget — a fouled injector or a degrading turbo burns
-        it down faster in real time, not the book figure. Boost ceiling is
-        the FADEC's own wastegate target at the recommended power level.
-        {mission.assumed_fields.length > 0 && (
-          <> {mission.assumed_fields.includes('derate_cost_min_on_station')
-            ? 'Derate cost is still an engineering estimate — no distance/speed-vs-power model exists yet to derive it.'
-            : `${mission.assumed_fields.join(', ')} still engineering estimates.`}</>
-        )}
+        Each of the 200 draws samples a fault from the diagnosis probabilities
+        and a severity and degradation rate from their estimated uncertainty,
+        then asks the engine model how long until a redline at each power
+        setting. Fuel state is from the metered flow. Assumed, not engine facts:
+        fuel load, reserve and return-to-base transit time.
       </Note>
     </Panel>
   );
@@ -490,15 +526,15 @@ export function VirtualSensorPanel() {
         <Metric label="Air mass flow" value={(virtual.air_mass_flow_kgps * 1000).toFixed(1)} unit="g/s" />
         <Metric label="Brake power" value={virtual.brake_power_kW.toFixed(1)} unit="kW" />
         <Metric label="BSFC (degraded)" value={virtual.bsfc_g_per_kWh.toFixed(0)} unit="g/kWh" />
-        <Metric label="Knock margin" value={virtual.knock_margin_deg.toFixed(1)} unit="°" />
+        <Metric label="Knock margin" value={virtual.knock_margin_deg == null ? 'not modelled' : virtual.knock_margin_deg.toFixed(1)} unit={virtual.knock_margin_deg == null ? '' : '°'} tone={virtual.knock_margin_deg == null ? 'dim' : undefined} />
         <Metric label="Turbo shaft" value={(virtual.turbo_shaft_rpm_est / 1000).toFixed(1)} unit="k rpm" />
       </div>
       <div className="cyl-strip">
         {Array.from({ length: N_CYL }, (_, i) => (
           <div className="cyl-chip" key={i}>
             <span className="cyl-chip-n">CYL {i + 1}</span>
-            <span className="cyl-chip-v">{virtual.peak_cyl_press_bar[i].toFixed(0)} bar</span>
-            <span className="cyl-chip-e">{(virtual.comb_efficiency[i] * 100).toFixed(1)}% η</span>
+            <span className="cyl-chip-v">{virtual.peak_cyl_press_bar ? `${virtual.peak_cyl_press_bar[i].toFixed(0)} bar` : 'p_max —'}</span>
+            <span className="cyl-chip-e">{virtual.comb_efficiency ? `${(virtual.comb_efficiency[i] * 100).toFixed(1)}% η` : 'η —'}</span>
           </div>
         ))}
       </div>

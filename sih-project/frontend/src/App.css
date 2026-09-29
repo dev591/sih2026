@@ -8,6 +8,12 @@
    with twenty-five hardcoded hexes the first time round. */
 
 :root {
+  /* Light page chrome, kept deliberately — see 23f74ca and 8d32803: metal at
+     high metalness needs a real studio environment to read on ANY backdrop
+     (fixed independently in the 3D layer), and a light page measures better
+     on a washed-out projector than a dark one competing with the stage.
+     The 3D engine stage itself stays a dark studio (SCENE in theme.ts) —
+     that split is deliberate, not a leftover. */
   --bg:        #f4f6f9;
   --bg-2:      #eaeef4;
   --panel:     #ffffff;
@@ -557,24 +563,71 @@ body {
 /* Expert view reserves the panel's height; the slot is what holds it open now
    that the canvas is not in the flow. */
 .panel-body-3d .engine-slot { min-height: 432px; }
+/* The canvas is a dark studio whatever the page theme, so its furniture uses
+   its own light-on-dark ink rather than the page tokens. */
+.engine3d { --s-ink: #c9d3df; --s-dim: #8793a3; --s-line: rgb(255 255 255 / 0.14); --s-glass: rgb(14 18 25 / 0.72); }
+.engine3d canvas { cursor: grab; }
+.engine3d canvas:active { cursor: grabbing; }
+.engine3d-pointer canvas { cursor: pointer; }
+
 .engine3d-hint {
-  position: absolute; bottom: 9px; left: 13px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
-  color: var(--text-dimr); pointer-events: none;
+  position: absolute; bottom: 10px; left: 14px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--s-dim); pointer-events: none;
 }
 
-/* Recovery from a judge's orbit. Same corner idiom as the hint rather than a
-   new visual language — it should read as part of the viewport furniture, not
-   as a control competing with the panels. */
-.engine3d-reset {
-  position: absolute; bottom: 7px; right: 13px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
-  color: var(--text-dimr); background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--line); border-radius: 2px;
-  padding: 3px 8px; cursor: pointer;
-  transition: color .12s, border-color .12s;
+/* View switch: one segmented control, top-left, out of the engine's way. */
+.engine3d-tools {
+  position: absolute; top: 12px; left: 14px;
+  display: flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--s-glass); backdrop-filter: blur(8px);
+  border: 1px solid var(--s-line); border-radius: 6px;
 }
-.engine3d-reset:hover { color: var(--accent); border-color: var(--accent); }
+.engine3d-tools button {
+  font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 0.01em;
+  color: var(--s-dim); background: transparent; border: 0; border-radius: 4px;
+  padding: 5px 11px; cursor: pointer; transition: color .15s, background .15s;
+}
+.engine3d-tools button:hover { color: var(--s-ink); }
+.engine3d-tools button.on { color: #0b0e13; background: #e6edf5; }
+.engine3d-tools-sep { width: 1px; height: 16px; background: var(--s-line); margin: 0 4px; }
+
+/* What the colours mean, stated once, on the canvas where the colours are. */
+.engine3d-legend {
+  position: absolute; top: 14px; right: 16px;
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--sans); font-size: 11.5px; color: var(--s-ink); pointer-events: none;
+}
+.engine3d-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.engine3d-legend .dot-fault { background: #ff7a1a; box-shadow: 0 0 8px #ff7a1a; }
+.engine3d-legend .dot-sensor { background: #22d3ee; box-shadow: 0 0 8px #22d3ee; }
+.engine3d-legend-arch { color: var(--s-dim); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; padding-left: 14px; border-left: 1px solid var(--s-line); }
+/* The same canvas is the full stage in simple mode and a panel in expert mode,
+   so its furniture sizes to the container, not the window. */
+.engine3d { container-type: size; }
+@container (max-width: 1100px) { .engine3d-legend-arch { display: none; } }
+@container (max-height: 560px) {
+  .engine3d-legend { top: auto; bottom: 10px; right: 14px; }
+  .engine3d-hint { display: none; }
+  /* four full tags do not fit side by side here; the faulted one keeps its reading */
+  .cyl-tag:not(.cyl-tag-on) .cyl-tag-v { display: none; }
+  .cyl-tag:not(.cyl-tag-on) { padding-right: 3px; }
+}
+
+/* Per-cylinder tag: number + live CHT. */
+.cyl-tag {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11.5px;
+  color: #dfe6ee; background: rgb(12 16 22 / 0.78); backdrop-filter: blur(6px);
+  border: 1px solid rgb(255 255 255 / 0.16); border-radius: 5px;
+  padding: 2px 6px 2px 3px; white-space: nowrap; pointer-events: none;
+  transition: border-color .3s, color .3s, box-shadow .3s;
+}
+.cyl-tag-n {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 3px;
+  background: rgb(255 255 255 / 0.1); font-weight: 600; font-size: 11px;
+}
+.cyl-tag-on { background: rgb(20 14 8 / 0.9); box-shadow: 0 0 0 3px rgb(255 122 26 / 0.18), 0 0 18px rgb(255 122 26 / 0.35); font-weight: 600; }
 
 /* ---------------- data source badge ---------------- */
 .brand-right { display: flex; align-items: center; gap: 10px; }
@@ -589,28 +642,8 @@ body {
 .src-live .src-dot { box-shadow: 0 0 7px var(--ok); }
 .src-simulated { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: var(--tint-warn); }
 .src-connecting { color: var(--text-dimr); }
-
-/* ---------------- ml pipeline status badge ---------------- */
-/* `ml_status.active === false` means diagnosis is main.py's ground-truth
-   stub, not the real classifier — this must never blend in as routine. */
-.ml-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
-  padding: 3px 9px; border-radius: 2px; border: 1px solid var(--line-2);
-  color: var(--text-dimr);
-}
-.ml-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ml-badge-live { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: var(--tint-ok); }
-.ml-badge-live .ml-dot { box-shadow: 0 0 7px var(--ok); }
-.ml-badge-stub {
-  color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent);
-  background: var(--tint-alert); animation: ml-stub-pulse 1.6s ease-in-out infinite;
-}
-.ml-badge-stub .ml-dot { box-shadow: 0 0 7px var(--alert); }
-@keyframes ml-stub-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
+.src-ml-down { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent); background: var(--tint-alert); }
+.ribbon-unmodelled { color: var(--text-dimr); }
 
 /* ---------------- twin confidence ---------------- */
 .conf-big { font-family: var(--mono); font-size: 30px; line-height: 1; }
@@ -739,6 +772,20 @@ body {
 }
 .fc-kind:hover { color: var(--text); border-color: var(--line-2); }
 .fc-kind-on { border-color: var(--accent); color: var(--text); background: var(--tint-accent); }
+.fc-dot {
+  flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok); opacity: 0.55;
+}
+.fc-dot-active {
+  background: var(--alert); opacity: 1;
+  box-shadow: 0 0 0 0 rgb(190 18 60 / 0.55);
+  animation: fc-dot-pulse 1.4s ease-out infinite;
+}
+@keyframes fc-dot-pulse {
+  0%   { box-shadow: 0 0 0 0 rgb(190 18 60 / 0.45); }
+  70%  { box-shadow: 0 0 0 6px rgb(190 18 60 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(190 18 60 / 0); }
+}
 .fc-fam {
   font-family: var(--mono); font-size: 7.5px; letter-spacing: 0.1em;
   padding: 2px 4px; border-radius: 2px; flex: 0 0 auto; width: 52px;
@@ -835,7 +882,8 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-2);
+  /* matches SCENE.bg: the canvas stops short of the verdict lane */
+  background: #0b0e13;
   border-top: 1px solid var(--line);
 }
 /* The engine no longer lives in the stage — a slot marks where it goes and the
@@ -860,31 +908,51 @@ body {
      paint straight over this card. */
   z-index: 10;
   transform: translateX(-50%);
-  display: grid;
-  grid-template-columns: auto 1px auto;
+  display: flex;
   align-items: stretch;
-  gap: 20px;
-  max-width: min(760px, calc(100% - 200px));
-  padding: 13px 22px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(7px);
-  border: 1px solid var(--line-2);
-  border-top: 2px solid var(--ok);
-  border-radius: 4px;
-  box-shadow: 0 4px 24px rgb(16 32 48 / 0.13);
+  gap: 22px;
+  max-width: min(1080px, calc(100% - 120px));
+  padding: 14px 24px;
+  /* Dark glass: it sits on the dark studio, so it speaks the canvas's ink,
+     and the status colours are the light variants that clear 4.5:1 on it. */
+  --v-ink: #e8eef5; --v-dim: #93a0b1; --v-line: rgb(255 255 255 / 0.12);
+  color: var(--v-ink);
+  background: rgb(13 17 24 / 0.82);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--v-line);
+  border-top: 2px solid #34d399;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.45);
   pointer-events: none;
 }
-.verdict-alert  { border-top-color: var(--alert); }
-.verdict-sensor { border-top-color: var(--sensor); }
+.verdict-alert  { border-top-color: #fb7185; }
+.verdict-sensor { border-top-color: #22d3ee; }
 /* Neither good news nor bad — the twin simply has nothing to report yet. */
-.verdict-idle   { border-top-color: var(--line-2); }
+.verdict-idle   { border-top-color: var(--v-line); }
+.verdict .tone-ok     { color: #34d399; }
+.verdict .tone-warn   { color: #fbbf24; }
+.verdict .tone-alert  { color: #fb7185; }
+.verdict .tone-sensor { color: #22d3ee; }
+.verdict .tone-dim    { color: var(--v-dim); }
+.verdict-half-warn { min-width: 260px; }
+.verdict-lead {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: 0.01em;
+}
+.verdict-lead em {
+  display: block; margin-top: 3px;
+  font-family: var(--sans); font-style: normal; font-weight: 500;
+  font-size: 12px; color: var(--v-ink); letter-spacing: 0;
+}
+/* A worded lead ("False alarm avoided") at the numeral's size wraps badly. */
+.verdict-lead.tone-sensor { font-family: var(--sans); font-size: 18px; }
 
 .verdict-half { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .verdict-half-main { min-width: 300px; }
-.verdict-rule { background: var(--line); }
+.verdict-rule { background: var(--v-line); width: 1px; flex: none; }
 .verdict-cap {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--text-dimr);
+  text-transform: uppercase; color: var(--v-dim);
 }
 .verdict-limits {
   font-family: var(--mono); font-size: 19px; letter-spacing: 0.04em;
@@ -892,16 +960,16 @@ body {
 .verdict-fault { font-size: 19px; font-weight: 600; line-height: 1.15; }
 .verdict-cyl {
   font-family: var(--mono); font-size: 11px; font-style: normal;
-  color: var(--text-dim); border: 1px solid var(--line-2);
+  color: var(--v-ink); border: 1px solid var(--v-line);
   padding: 1px 5px; border-radius: 2px; margin-left: 8px;
   vertical-align: 2px;
 }
-.verdict-note { font-size: 10.5px; color: var(--text-dimr); }
+.verdict-note { font-size: 11px; color: var(--v-dim); }
 /* The refusal-to-guess line. Deliberately not toned as an alarm: it qualifies
    the diagnosis above it rather than announcing a second fault. */
 .verdict-novelty {
   font-size: 10.5px; margin-top: 3px; padding-left: 7px;
-  color: var(--text-dim); border-left: 2px solid var(--line-2);
+  color: var(--v-ink); border-left: 2px solid var(--v-line);
 }
 
 /* ---- edge tabs ---- */

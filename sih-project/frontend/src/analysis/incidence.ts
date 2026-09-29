@@ -25,7 +25,7 @@ export const INCIDENCE: Partial<Record<FaultId, number[]>> = {
   turbo_degradation:   [-2,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0],
   injector_fouling:    [ 0, -2,  0,  1,  0,  2,  2,  2,  2,  0,  2],
   fuel_filter_clog:    [ 0, -2,  0,  1, -1,  0,  0,  0,  0,  0,  0],
-  ignition_misfire:    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
+  injection_misfire:    [ 0,  0,  0,  2, -1, -2, -2, -2, -2,  0,  2],
   cooling_fouling:     [ 0,  0,  0,  1,  0,  1,  1,  1,  1,  1,  0],
   oil_pump_wear:       [ 0,  0,  0,  0,  1,  0,  0,  0,  0, -2,  0],
   bearing_wear:        [ 0,  0,  0,  1,  2,  0,  0,  0,  0, -1,  0],

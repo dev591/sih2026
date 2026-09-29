@@ -70,28 +70,27 @@ function SourceBadge() {
   );
 }
 
-/** Loud, not silent: `health.ml_status.active === false` means the diagnosis
- *  on screen is `main.py::_diagnosis()`'s ground-truth stub, not the real
- *  M2/M3 classifier — schema-identical to a real diagnosis, so this badge is
- *  the only thing that tells them apart. Must never be quietly absent. */
-function MlStatusBadge() {
+/**
+ * Whether the diagnosis on screen came from the ML layer. On the live feed the
+ * backend reports this on every frame. If the layer is down there is NO
+ * diagnosis — the backend used to fall back to the injected fault itself,
+ * which on screen was indistinguishable from a working classifier.
+ */
+function MlBadge() {
+  const source = useMission((s) => s.source);
   const tick = useCurrentTick();
-  const status = tick.health.ml_status;
-  if (status.active) {
-    return (
-      <span className="ml-badge ml-badge-live" title="diagnosis is the real M2/M3 classifier output">
-        <span className="ml-dot" />
-        ML LIVE
-      </span>
-    );
-  }
+  if (source !== 'live') return null;
+  const st = tick.health.ml_status;
+  if (!st) return null;
   return (
     <span
-      className="ml-badge ml-badge-stub"
-      title={`Diagnosis is a GROUND-TRUTH STUB, not a real classifier — ${status.reason ?? 'ML pipeline unavailable'}`}
+      className={`src-badge ${st.active ? 'src-live' : 'src-ml-down'}`}
+      title={st.active
+        ? `Diagnosis from the ML layer${st.commissioned ? ` · engine commissioned ${st.commissioned}` : ''}`
+        : `ML layer unavailable: ${st.reason ?? 'unknown reason'}`}
     >
-      <span className="ml-dot" />
-      ML FALLBACK · STUB DIAGNOSIS
+      <span className="src-dot" />
+      {st.active ? 'ML LIVE' : 'ML OFFLINE · NO DIAGNOSIS'}
     </span>
   );
 }
@@ -106,18 +105,34 @@ function StatusBar() {
     <div className={`ribbon${alerting ? (health.diagnosis.is_sensor_fault ? ' ribbon-sensor' : ' ribbon-alert') : ''}`}>
       <span className="ribbon-tag">ENGINE {slow.engine_id}</span>
       <span className="ribbon-item">{slow.rpm.toFixed(0)} <em>rpm</em></span>
+      <span className="ribbon-item">{slow.prop_rpm.toFixed(0)} <em>prop rpm</em></span>
+      {/* null on a fixed-pitch propeller (Rotax) — a governed blade angle only
+          exists where there is a governor to read it, never fabricated. */}
+      {slow.blade_angle_deg != null && (
+        <span className="ribbon-item">{slow.blade_angle_deg.toFixed(1)}<em>° blade</em></span>
+      )}
       <span className="ribbon-item">{slow.altitude_ft.toFixed(0)} <em>ft</em></span>
       <span className="ribbon-item">{slow.map_hPa.toFixed(0)} <em>hPa</em></span>
       <span className="ribbon-item">{(slow.fuel_flow_kgps * 3600).toFixed(1)} <em>kg/h</em></span>
       <span className="ribbon-item">λ {slow.lambda.toFixed(2)}</span>
-      <span className="ribbon-item">{slow.bus_voltage_V != null ? `${slow.bus_voltage_V.toFixed(1)} ` : '— '}<em>V</em></span>
-      <span className="ribbon-item">{slow.alternator_A != null ? `${slow.alternator_A.toFixed(1)} ` : '— '}<em>A</em></span>
-      <span className="ribbon-item">inj {slow.inj_timing_deg != null ? `${slow.inj_timing_deg.toFixed(1)}` : '—'}<em>°</em></span>
+      {/* Electrical bus and injection timing are in the PS but nothing models
+          them yet. They used to show frozen numbers as if they were live. */}
+      <span className="ribbon-item ribbon-unmodelled" title="Not modelled — no electrical model yet">
+        {slow.bus_voltage_V == null ? '—' : slow.bus_voltage_V.toFixed(1)} <em>V</em>
+      </span>
+      <span className="ribbon-item ribbon-unmodelled" title="Not modelled — no electrical model yet">
+        {slow.alternator_A == null ? '—' : slow.alternator_A.toFixed(1)} <em>A</em>
+      </span>
+      <span className="ribbon-item ribbon-unmodelled" title="Not modelled — no injection-timing schedule yet">
+        inj {slow.inj_timing_deg == null ? '—' : slow.inj_timing_deg.toFixed(1)}<em>°</em>
+      </span>
       <span className="ribbon-spacer" />
       <span className="ribbon-status">
-        {alerting
-          ? (health.diagnosis.is_sensor_fault ? 'INSTRUMENTATION FAULT' : 'COMPONENT FAULT')
-          : 'NOMINAL'}
+        {health.diagnosis.unavailable
+          ? 'DIAGNOSIS UNAVAILABLE'
+          : alerting
+            ? (health.diagnosis.is_sensor_fault ? 'INSTRUMENTATION FAULT' : 'COMPONENT FAULT')
+            : 'NOMINAL'}
       </span>
     </div>
   );
@@ -125,7 +140,17 @@ function StatusBar() {
 
 function EngineSubtitle() {
   const engine = useMission((s) => s.engine);
+  const mode = useMission((s) => s.mode);
   const paths = Object.values(engine.parityPaths).filter(Boolean).length;
+  // A first-time viewer needs to know what they are looking at, not how it
+  // works; the parity-path count is for the engineer who opens expert mode.
+  if (mode === 'simple') {
+    return (
+      <span className="brand-sub">
+        Digital twin of the {engine.name} · finds faults before any limit alarm
+      </span>
+    );
+  }
   return (
     <span className="brand-sub">
       Over-determined engine twin · {engine.name} · {paths} parity paths →{' '}
@@ -271,7 +296,7 @@ export default function App() {
         <div className="brand-right">
           <EngineSelector />
           <SourceBadge />
-          <MlStatusBadge />
+          <MlBadge />
           <ReportButton />
           <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
