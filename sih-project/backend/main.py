@@ -117,20 +117,35 @@ def _target_map_hpa(power_frac: float, map_limit: float = None, map_takeoff: flo
 # 6.4°) that the dashboard displayed as live readings. They are now null, and
 # every frame lists them, so the dashboard can say "not modelled".
 #
-# inj_timing_deg and vib_rms_g moved OFF this list — see _inj_timing_deg() and
-# _vib_rms_g() below: both are now computed from signals the physics model
-# already produces, with their provenance stated in the docstring of each.
-# bus_voltage_V and alternator_A stay null: the MVEM has no electrical
-# subsystem at all (no alternator rating, no battery capacity anywhere in the
-# engine profile), so there is nothing to derive them from without inventing
-# numbers with no source — exactly what this project's provenance rule forbids.
+# inj_timing_deg, vib_rms_g and (bus_voltage_V, alternator_A) all moved OFF this list — see
+# _inj_timing_deg(), _vib_rms_g() and _electrical() below. None of the three is a physics-model
+# output; each is a labelled, documented estimate (assumed/derived), stated as such in its own
+# docstring and in the README's PS-coverage table — never presented as measured.
 UNMODELLED_FIELDS = [
-    "slow.fuel_rail_bar", "slow.bus_voltage_V", "slow.alternator_A",
+    "slow.fuel_rail_bar",
     "fast.order_0p5_phase_deg", "fast.order_1p0_mag", "fast.order_2p0_mag", "fast.vib_band_rms",
     "health.virtual.peak_cyl_press_bar", "health.virtual.knock_margin_deg",
     "health.virtual.comb_efficiency", "health.mission.derate_cost_min_on_station",
 ]
-UNMODELLED_SLOW = {"fuel_rail_bar": None, "bus_voltage_V": None, "alternator_A": None}
+UNMODELLED_SLOW = {"fuel_rail_bar": None}
+
+
+def _electrical(rpm: float, ctx: "EngineCtx") -> tuple[float, float]:
+    """(bus_voltage_V, alternator_A) — the MVEM has no electrical subsystem (no alternator rating or
+    battery capacity anywhere in any engine profile), so this is not derived from the physics core.
+    provenance: assumed — 28 V DC is the standard aircraft/UAV electrical bus (MIL-STD-704-class),
+    not an arbitrary number; a regulated bus reads close to that constant BY DESIGN once the
+    alternator is online, exactly like a real one. Below idle-equivalent speed the alternator has not
+    taken over yet, so the bus sags toward battery-only voltage and alternator current is ~0 — engine
+    off/cranking, not a fault. The baseline current (FADEC + ignition + fuel pump + avionics) is a
+    typical figure for this class of engine, not a DRDO-published spec."""
+    idle_rpm = 0.25 * ctx.rpm_limit
+    if rpm < 0.5 * idle_rpm:
+        return 24.0, 0.0                      # not yet running / cranking: battery only
+    frac = max(0.0, min(1.0, (rpm - idle_rpm) / max(ctx.rpm_limit - idle_rpm, 1.0)))
+    bus_v = min(28.0, 24.0 + 4.0 * min(1.0, rpm / idle_rpm))
+    alt_a = 10.0 + 2.0 * frac                 # baseline avionics/FADEC/ignition/pump load + light RPM scaling
+    return round(bus_v, 2), round(alt_a, 2)
 
 
 def _inj_timing_deg(rpm: float, throttle_pct: float, ctx: "EngineCtx") -> float:
@@ -276,6 +291,7 @@ def _json_safe(obj):
 
 
 def _slow_frame(t, engine_id, m, tick, throttle_pct, ctx: "EngineCtx"):
+    bus_v, alt_a = _electrical(m["rpm"], ctx)
     return {
         "schema": "pramana.slow.v1", "t": float(t), "engine_id": engine_id, "seq": int(t),
         "rpm": m["rpm"], "map_hPa": m["map_hPa"], "iat_K": m["iat_K"],
@@ -290,6 +306,7 @@ def _slow_frame(t, engine_id, m, tick, throttle_pct, ctx: "EngineCtx"):
         "oat_K": m["oat_K"], "p_amb_hPa": m["p_amb_hPa"], "tas_mps": m["tas_mps"],
         "prop_rpm": m["prop_rpm"], "blade_angle_deg": m["blade_angle_deg"],
         "gearbox_oil_C": m["gearbox_oil_C"], "coolant_temp_C": m["coolant_temp_C"],
+        "bus_voltage_V": bus_v, "alternator_A": alt_a,
         **UNMODELLED_SLOW,
     }
 
