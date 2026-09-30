@@ -16,6 +16,7 @@ import { useCurrentTick, useMission } from './state/missionStore';
 import { useEngineSlot } from './state/engineSlot';
 import { EnginePicker } from './components/EnginePicker';
 import { AssistantChat } from './components/AssistantChat';
+import { MissionHistory } from './components/MissionHistory';
 import './App.css';
 
 /** Where the data on screen came from. Deliberately prominent: a demo must
@@ -296,6 +297,7 @@ export default function App() {
           <SourceBadge />
           <MlBadge />
           <ReportButton />
+          <MissionHistory />
           <ModeToggle />
           <span className="ps-tag">SIH26054 · DRDO</span>
         </div>

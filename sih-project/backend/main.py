@@ -49,6 +49,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
 # on screen. Holds exactly what was sent; nothing is derived or added here.
 _LATEST: dict = {"frame": None}
 _assistant = None   # set below once assistant_api imports
+_missions = None    # set below once missions imports
 
 
 @app.get("/latest")
@@ -287,6 +288,9 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 print(f"[main] ML pipeline failed to load ({exc})")
                 ml_error = str(exc)
     fuel = {"burned_kg": 0.0}
+    # Mission history (PS requirement E): a flight recorder for this session, flushed to a file on reset
+    # or disconnect. Every call is wrapped — recording must never be able to break the live stream.
+    recorder = _missions.MissionRecorder(ctx.id) if _missions else None
 
     async def _receive() -> None:
         try:
@@ -299,12 +303,23 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 elif kind == "altitude":
                     session.command_altitude(float(msg.get("ft", 11000.0)))
                 elif kind == "reset":
+                    if recorder is not None:
+                        try:
+                            recorder.flush()
+                        except Exception as exc:
+                            print(f"[main] mission recording flush failed ({exc})")
                     session.fault_config = {}
                     session.alt_cmd = None
                     if ml is not None:
                         ml.reset()
         except (WebSocketDisconnect, RuntimeError):
             pass
+        finally:
+            if recorder is not None:
+                try:
+                    recorder.flush()
+                except Exception as exc:
+                    print(f"[main] mission recording flush failed ({exc})")
 
     async def _send() -> None:
         try:
@@ -416,6 +431,11 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 _LATEST["frame"] = frame_out
                 if _assistant is not None:
                     _assistant.publish(ctx.id, frame_out, client_id)
+                if recorder is not None:
+                    try:
+                        recorder.append(slow["t"], slow, health)
+                    except Exception as exc:
+                        print(f"[main] mission recording append failed ({exc})")
                 await websocket.send_json(frame_out)
                 await asyncio.sleep(1.0)
         except (WebSocketDisconnect, RuntimeError):
@@ -609,6 +629,31 @@ try:
 except Exception as exc:
     _assistant, ASSISTANT_ERROR = None, str(exc)
     print(f"[main] assistant API unavailable ({exc})")
+
+# Mission history / replay (PS requirement E). Optional: the telemetry server stays up without it.
+try:
+    import missions as _missions
+    MISSIONS_ERROR: str | None = None
+except Exception as exc:
+    _missions, MISSIONS_ERROR = None, str(exc)
+    print(f"[main] mission history unavailable ({exc})")
+
+
+@app.get("/missions")
+def list_past_missions():
+    if _missions is None:
+        raise HTTPException(503, f"mission history unavailable: {MISSIONS_ERROR}")
+    return {"missions": _missions.list_missions()}
+
+
+@app.get("/missions/{mission_id}")
+def get_past_mission(mission_id: str):
+    if _missions is None:
+        raise HTTPException(503, f"mission history unavailable: {MISSIONS_ERROR}")
+    m = _missions.load_mission(mission_id)
+    if m is None:
+        raise HTTPException(404, "no such mission")
+    return m
 
 
 if __name__ == "__main__":
