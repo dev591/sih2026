@@ -73,6 +73,7 @@ export function AssistantChat() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
+  const [watching, setWatching] = useState(false);
   const [speak, setSpeak] = useState(true);
   const [warm, setWarm] = useState<'no' | 'loading' | 'ready' | 'failed'>('no');
   const [lat, setLat] = useState<string | null>(null);
@@ -86,6 +87,8 @@ export function AssistantChat() {
   const cancelSpeech = useRef(0);
   const scroller = useRef<HTMLDivElement | null>(null);
   const keyDown = useRef(false);
+  const observeTimer = useRef<number | null>(null);
+  const observeUntil = useRef(0);
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [msgs, phase]);
 
@@ -128,6 +131,34 @@ export function AssistantChat() {
     if (my === cancelSpeech.current) setPhase('idle');
   }, []);
 
+  const stopObserving = useCallback(() => {
+    if (observeTimer.current) { window.clearInterval(observeTimer.current); observeTimer.current = null; }
+    setWatching(false);
+  }, []);
+
+  // After a command runs (test injected, altitude changed, reset), keep quietly checking the live frame
+  // and speak up only when something actually moved — the alarm fires, the diagnosis appears or changes,
+  // an ambiguity or novelty flag flips. Most polls cost one dict comparison on the backend, no LLM call.
+  const startObserving = useCallback((engine: string) => {
+    stopObserving();
+    setWatching(true);
+    observeUntil.current = Date.now() + 150_000;               // most faults alarm well inside this window
+    observeTimer.current = window.setInterval(async () => {
+      if (Date.now() > observeUntil.current) { stopObserving(); return; }
+      try {
+        const r = await post<{ changed: boolean; text: string | null; ms: number }>('/assistant/observe',
+          { engine, client: CLIENT_ID, session: session.current });
+        if (r.changed && r.text) {
+          setMsgs((m) => [...m, { role: 'assistant', text: r.text!, meta: 'observing' }]);
+          if (speak) void say(r.text, performance.now());
+        }
+      } catch { /* a missed poll is not worth surfacing */ }
+    }, 7000);
+  }, [speak, say, stopObserving]);
+
+  useEffect(() => stopObserving, [stopObserving]);
+  useEffect(() => { stopObserving(); }, [engineId, stopObserving]);   // switching engines ends the old watch
+
   const ask = useCallback(async (q: string, viaVoice: boolean, sttMs?: number) => {
     const question = q.trim();
     if (!question || !engineId) return;
@@ -137,7 +168,12 @@ export function AssistantChat() {
     const started = performance.now();
     try {
       const r = await post<{ reply: string; kind: string; ms: number; actions?: Action[] }>('/assistant/chat', { text: question, engine: engineId, session: session.current, client: CLIENT_ID });
-      if (r.actions && r.actions.length) runActions(r.actions);
+      if (r.actions && r.actions.length) {
+        runActions(r.actions);
+        // 'reset' alone means "back to healthy" — nothing left to watch develop.
+        if (r.actions.some((a) => a.type !== 'reset')) startObserving(engineId);
+        else stopObserving();
+      }
       setMsgs((m) => [...m, { role: 'assistant', text: r.reply,
         meta: r.kind === 'command' ? 'applied to the live twin'
           : r.kind === 'decision' ? 'from the mission layer'
@@ -149,7 +185,7 @@ export function AssistantChat() {
       setMsgs((m) => [...m, { role: 'assistant', text: `I could not answer: ${(e as Error).message}`, meta: 'error' }]);
       setPhase('idle');
     }
-  }, [engineId, speak, say, stopSpeech]);
+  }, [engineId, speak, say, stopSpeech, startObserving, stopObserving]);
 
   const startRec = useCallback(async () => {
     if (phase === 'listening' || !live) return;
@@ -222,7 +258,7 @@ export function AssistantChat() {
 
   const busy = phase === 'transcribing' || phase === 'thinking';
   const status: Record<Phase, string> = {
-    idle: warm === 'loading' ? 'Warming up the speech and language models…' : 'Ready',
+    idle: warm === 'loading' ? 'Warming up the speech and language models…' : watching ? 'Watching the test develop…' : 'Ready',
     listening: 'Listening… release to send', transcribing: 'Transcribing…', thinking: 'Thinking…', speaking: 'Speaking…',
   };
 

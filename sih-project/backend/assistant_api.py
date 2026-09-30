@@ -1,10 +1,15 @@
 """
 In-app assistant API: chat, speech-to-text, text-to-speech. All local; nothing leaves this machine.
 
-  POST /assistant/warm   load Whisper + Kokoro and keep the LLM resident (call when the chat opens)
-  POST /assistant/chat   {text, engine, session}  -> {reply, kind, ms}
-  POST /assistant/stt    raw audio body (webm/wav) -> {text, ms}
-  POST /assistant/tts    {text}                    -> audio/wav
+  POST /assistant/warm      load Whisper + Kokoro and keep the LLM resident (call when the chat opens)
+  POST /assistant/chat      {text, engine, session}  -> {reply, kind, ms}
+  POST /assistant/observe   {engine, client, session} -> {changed, text, ms} — poll this after a command so
+                            the assistant keeps narrating as the injected fault actually develops, without
+                            being asked again each time. Cheap: it only calls the model when something in
+                            the frame (alarm state, diagnosis, novelty, limits) has actually moved since the
+                            last poll — most polls cost one dict comparison, no LLM call at all.
+  POST /assistant/stt       raw audio body (webm/wav) -> {text, ms}
+  POST /assistant/tts       {text}                    -> audio/wav
 
 Grounding: the chat answers from the newest frame of THE ENGINE THE USER OPENED IN THIS TAB, never from another
 engine or tab. Explaining is read-only. The only thing it can DO to the twin is what the user explicitly commands
@@ -92,6 +97,48 @@ def _session(sid: str) -> dict:
     return _sessions[sid]
 
 
+def _observe_trigger(h: dict) -> dict:
+    """The handful of health-block fields worth watching for a change. Deliberately COARSE: RPM/MAP/CHT
+    and the raw anomaly score wobble every tick and would make every poll 'changed'; this decides only
+    WHETHER to say anything, never what number to quote (see _observe_state for the real values)."""
+    dg = h.get("diagnosis") or {}
+    top = (dg.get("top") or [{}])[0]
+    an = h.get("anomaly") or {}
+    nv = h.get("novelty") or {}
+    return {
+        "alarm": bool((an.get("persistence") or {}).get("met")),
+        "fault": top.get("fault"), "cyl": top.get("cylinder"),
+        "p_bucket": round((top.get("p") or 0) * 5) / 5,          # coarse, so 0.81 -> 0.82 isn't "changed"
+        "ambiguous": bool(dg.get("ambiguous")), "sensor_fault": bool(dg.get("is_sensor_fault")),
+        "novel": bool(nv.get("exceeded")), "limits": h.get("limits_state"),
+        "recommended": (h.get("mission") or {}).get("recommended"),
+    }
+
+
+def _observe_state(h: dict) -> dict:
+    """The REAL numbers behind the trigger fields above — tracked on every poll regardless of whether
+    a narration fires, so that when one does, the delta line can quote an actual before/after pair
+    instead of the model estimating one."""
+    dg = h.get("diagnosis") or {}
+    top = (dg.get("top") or [{}])[0]
+    an = h.get("anomaly") or {}
+    return {"score": round(an.get("score") or 0.0, 4), "threshold": round(an.get("threshold") or 0.0, 4),
+            "p": round(top.get("p") or 0.0, 3)}
+
+
+OBSERVE_PROMPT = """You are narrating a live engine test as it develops, for someone watching the same
+screen. Something just changed since your last check — say ONLY what changed and what it means, in ONE
+short sentence, like a colleague glancing over. Do not repeat the full picture, do not say hello or
+restate the test. If the change is the alarm firing or the diagnosis naming a fault for the first time,
+that is the important one to say.
+
+The line starting "CHANGED:" below is the ONLY source for any before/after numbers. If you state a
+numeric change (e.g. "the anomaly score rose"), you MUST quote the exact values from that line, copied
+verbatim — never estimate, round to a nicer number, or invent a "before" value that isn't written there.
+If CHANGED does not include a number for what you want to describe, describe it in words only, with no
+number."""
+
+
 @router.post("/warm")
 def warm():
     t0 = time.time()
@@ -165,6 +212,47 @@ def chat(payload: dict = Body(...)):
     s["history"] += [{"role": "user", "content": q}, {"role": "assistant", "content": reply}]
     s["history"] = s["history"][-12:]
     return {"reply": reply, "kind": kind, "ms": round((time.time() - t0) * 1000), "frame_age_s": round(age, 1)}
+
+
+@router.post("/observe")
+def observe(payload: dict = Body(...)):
+    """Poll after a command. Cheap on every call except the ones where something real moved."""
+    engine = str(payload.get("engine") or "")
+    client = str(payload.get("client") or "")
+    s = _session(str(payload.get("session") or "default"))
+    t0 = time.time()
+
+    key = f"{engine}|{client}" if client and f"{engine}|{client}" in LATEST else engine
+    entry = LATEST.get(key)
+    if entry is None:
+        return {"changed": False, "text": None, "ms": 0}
+    frame, at = entry
+    if time.time() - at > STALE_S:
+        return {"changed": False, "text": None, "ms": 0}
+
+    h = frame.get("health") or {}
+    now_trigger = _observe_trigger(h)
+    now_real = _observe_state(h)
+    prev_trigger = s.get("observe_trigger")
+    prev_real = s.get("observe_real")
+    s["observe_trigger"], s["observe_real"] = now_trigger, now_real
+    if prev_trigger is None or now_trigger == prev_trigger:
+        return {"changed": False, "text": None, "ms": round((time.time() - t0) * 1000)}
+
+    with _lock:
+        ea.HIST.clear()
+        for f in list(HISTORY.get(key, [])):
+            ea.sample(f)
+        facts, t = ea.render(frame)
+    state_delta = ", ".join(f"{k}: {prev_trigger[k]!r} -> {v!r}" for k, v in now_trigger.items() if v != prev_trigger[k])
+    num_delta = ", ".join(f"{k} {prev_real[k]} -> {v}" for k, v in now_real.items() if prev_real and v != prev_real[k])
+    q = f"What just changed?\nCHANGED: {state_delta}{('; numbers: ' + num_delta) if num_delta else ''}"
+    msgs = [{"role": "system", "content": OBSERVE_PROMPT + f"\n\nFACTS (live, t = {t} s):\n{facts}"},
+            {"role": "user", "content": q}]
+    text = ea.call_ollama(MODEL, msgs)
+    s["history"] += [{"role": "assistant", "content": text}]
+    s["history"] = s["history"][-12:]
+    return {"changed": True, "text": text, "ms": round((time.time() - t0) * 1000)}
 
 
 @router.post("/stt")

@@ -316,16 +316,21 @@ def decision_answer(frame: dict) -> str:
             f"'{rec}' — the decision stays with you.")
 
 
-def ask(model: str, facts: str, t: float, q: str, history: list) -> str:
-    msgs = [{"role": "system", "content": SYSTEM.format(t=t, facts=facts)}] + history[-6:] + [{"role": "user", "content": q}]
-    # think=False: reasoning models (gemma4, qwen3) otherwise burn tokens on hidden
-    # reasoning; keep_alive avoids a ~14 s cold load between questions.
-    body = json.dumps({"model": model, "messages": msgs, "stream": False,
+def call_ollama(model: str, messages: list) -> str:
+    """Shared low-level call — ask() below and assistant_api.py's /observe both go through this, so
+    there is one place that owns think=False (reasoning models otherwise burn tokens on hidden
+    reasoning) and keep_alive (avoids a ~14 s cold load between calls)."""
+    body = json.dumps({"model": model, "messages": messages, "stream": False,
                        "think": False, "keep_alive": "2h",
                        "options": {"temperature": 0.1, "num_ctx": 8192}}).encode()
     req = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read())["message"]["content"].strip()
+
+
+def ask(model: str, facts: str, t: float, q: str, history: list) -> str:
+    msgs = [{"role": "system", "content": SYSTEM.format(t=t, facts=facts)}] + history[-6:] + [{"role": "user", "content": q}]
+    return call_ollama(model, msgs)
 
 
 def main():
