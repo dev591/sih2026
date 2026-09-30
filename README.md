@@ -24,14 +24,16 @@ Every number below was measured on the development machine, not estimated. See [
 |---|---|---|
 | **A.** Digital twin core, live data sync, modular | ✅ Built | MVEM in lockstep with the WebSocket feed; engine parameters are a YAML profile, not hardcoded |
 | **B.** Health monitoring: RPM, CHT, EGT, oil, fuel flow, ... | ✅ Built | Per-cylinder CHT/EGT, oil pressure/temp, fuel flow, MAP, turbo speed |
-| — vibration, battery/alternator, injection timing | ⚠️ Explicitly `null` | Not modelled — served as `null` on purpose rather than faked; the system never invents a sensor reading it doesn't have |
+| — vibration RMS | ✅ Built | Derived from the crank speed-ripple and knock-intensity signals the physics model already computes — labelled `derived`, not an independently calibrated channel |
+| — injection timing | ✅ Built | A representative common-rail FADEC advance schedule scaled to the engine's own idle/rated speed — labelled `assumed`, no published DRDO map exists to calibrate against |
+| — battery/alternator | ⚠️ Explicitly `null` | The engine model has no electrical subsystem at all (no alternator rating, no battery capacity anywhere in the profile) — serving a number here would mean inventing one with no source, so it stays `null` |
 | **C.** Fault detection (misfire, injector, lubrication, sensor drift, ...) | ✅ Built | **15 fault types**, all live-tested through the real WebSocket, 15/15 detected |
 | **D.** Anomaly detection, RUL, trend analysis | ✅ Built | Autoencoder gate + classifier; RUL (p10/p50/p90) computed for faults with a real redline crossing (4 of 14) — the rest correctly report "not available" |
 | **D.** Maintenance advisory | ✅ Built | A deterministic mission-reliability layer gives a Continue/Derate/RTB verdict; the AI assistant explains it but never decides it |
 | **E.** Mission replay | ✅ Built | Every completed run is recorded to a flat file and replayable from the "History" drawer — independent of the live session |
 | **E.** Environment scenarios (altitude, hot-day, endurance) | ✅ Built | Altitude sweep verified 0–20,000 ft; ISA+20 hot-day case in `verify.py`; fuel/endurance and point-of-no-return tracked live |
 | **F.** Dashboard, live 3D twin, fault console, reports | ✅ Built | Interactive 3D engine, live fault console, a printable post-flight engineering report |
-| CAN bus / ECU interface | 📋 Roadmap | PS lists this as optional ("may use") |
+| CAN bus / ECU interface | 🧪 Encoding built | Telemetry is packed into CANaerospace-style frames (`backend/can_frames.py`, `GET /can/latest`); PS marks this optional ("may use"). This is the frame **format**, not a live bus — `SocketCAN`/`vcan0` is Linux-only and this runs on Windows, so a real bus needs a Linux host or a USB-CAN adapter as a next step |
 
 ---
 

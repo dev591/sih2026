@@ -26,6 +26,7 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+import can_frames
 from parity.residuals import EXTRA_NAMES, extra_names
 from twin.profiles import load_engine_profile
 from twin.session import EngineSession
@@ -57,6 +58,17 @@ def latest_frame():
     if _LATEST["frame"] is None:
         return {"available": False, "frame": None}
     return {"available": True, "frame": _LATEST["frame"]}
+
+
+@app.get("/can/latest")
+def can_latest_frame():
+    """The most recent live frame, CAN-encoded (backend/can_frames.py). Read-only — this endpoint is
+    never called by the live telemetry loop, so it cannot affect the live stream either way. See that
+    module's docstring: this is the frame FORMAT, not a running SocketCAN bus (which needs a Linux host)."""
+    if _LATEST["frame"] is None:
+        return {"available": False, "frames": None}
+    return {"available": True, "note": "CAN-frame encoding of the live telemetry — see backend/can_frames.py",
+            "frames": can_frames.encode_frame(_LATEST["frame"])}
 
 
 cfg = load_engine_profile()   # reads PRAMANA_ENGINE env var, defaults to vrde_180
@@ -104,15 +116,49 @@ def _target_map_hpa(power_frac: float, map_limit: float = None, map_takeoff: flo
 # be served as frozen numbers (27.8 V, 14.2 A, 12.4°, 900 bar, 0.42 g, 140 bar,
 # 6.4°) that the dashboard displayed as live readings. They are now null, and
 # every frame lists them, so the dashboard can say "not modelled".
+#
+# inj_timing_deg and vib_rms_g moved OFF this list — see _inj_timing_deg() and
+# _vib_rms_g() below: both are now computed from signals the physics model
+# already produces, with their provenance stated in the docstring of each.
+# bus_voltage_V and alternator_A stay null: the MVEM has no electrical
+# subsystem at all (no alternator rating, no battery capacity anywhere in the
+# engine profile), so there is nothing to derive them from without inventing
+# numbers with no source — exactly what this project's provenance rule forbids.
 UNMODELLED_FIELDS = [
-    "slow.fuel_rail_bar", "slow.inj_timing_deg", "slow.bus_voltage_V",
-    "slow.alternator_A", "slow.vib_rms_g", "fast.order_0p5_phase_deg",
-    "fast.order_1p0_mag", "fast.order_2p0_mag", "fast.vib_band_rms",
+    "slow.fuel_rail_bar", "slow.bus_voltage_V", "slow.alternator_A",
+    "fast.order_0p5_phase_deg", "fast.order_1p0_mag", "fast.order_2p0_mag", "fast.vib_band_rms",
     "health.virtual.peak_cyl_press_bar", "health.virtual.knock_margin_deg",
     "health.virtual.comb_efficiency", "health.mission.derate_cost_min_on_station",
 ]
-UNMODELLED_SLOW = {"fuel_rail_bar": None, "inj_timing_deg": None,
-                   "bus_voltage_V": None, "alternator_A": None}
+UNMODELLED_SLOW = {"fuel_rail_bar": None, "bus_voltage_V": None, "alternator_A": None}
+
+
+def _inj_timing_deg(rpm: float, throttle_pct: float, ctx: "EngineCtx") -> float:
+    """Injection advance, degrees BTDC — a FADEC-typical common-rail schedule, not a physics-model
+    output: nothing published gives DRDO's actual VRDE injection map, and the MVEM does not simulate
+    fuel-injection timing at all. provenance: assumed — a representative common-rail aero-diesel
+    schedule (advance rises with speed to compensate injection/flame-development delay; a small
+    high-load retard limits peak cylinder pressure), scaled to THIS engine's own idle/rated speed so
+    it stays sane for any onboarded engine. Informational display only — no residual or ML feature
+    reads this."""
+    idle_rpm = 0.25 * ctx.rpm_limit           # no published idle spec; a typical diesel idle fraction
+    frac = max(0.0, min(1.0, (rpm - idle_rpm) / max(ctx.rpm_limit - idle_rpm, 1.0)))
+    base_deg, max_deg = 8.0, 18.0
+    retard = 3.0 * max(0.0, (throttle_pct - 70.0) / 30.0)
+    return max(4.0, min(20.0, base_deg + (max_deg - base_deg) * frac - retard))
+
+
+def _vib_rms_g(ripple: float, detonation_sev) -> float:
+    """Vibration RMS, g — derived, not an independently measured or calibrated channel. Combines two
+    signals the engine model already computes for other purposes: the crankshaft 0.5-order speed
+    ripple (mvem.py's own rotating/reciprocating-imbalance estimate, also used for rho11 and
+    fast.order_0p5_mag) and per-cylinder detonation severity (already served as fast.knock_intensity).
+    Both are physically real contributors to case-mounted vibration; the combining weights are
+    provenance: assumed — chosen to give a plausible healthy baseline and a visible rise under an
+    imbalance or knock fault, not calibrated against a real accelerometer."""
+    baseline_g = 0.12
+    knock_mean = float(np.mean(detonation_sev)) if len(detonation_sev) else 0.0
+    return round(baseline_g + 2.0 * float(ripple) + 0.5 * knock_mean, 4)
 
 # ---------------------------------------------------------------------------
 # MISSION INPUTS — scenario assumptions, not engine facts
@@ -229,7 +275,7 @@ def _json_safe(obj):
     return obj
 
 
-def _slow_frame(t, engine_id, m, tick, throttle_pct):
+def _slow_frame(t, engine_id, m, tick, throttle_pct, ctx: "EngineCtx"):
     return {
         "schema": "pramana.slow.v1", "t": float(t), "engine_id": engine_id, "seq": int(t),
         "rpm": m["rpm"], "map_hPa": m["map_hPa"], "iat_K": m["iat_K"],
@@ -238,7 +284,9 @@ def _slow_frame(t, engine_id, m, tick, throttle_pct):
         "fuel_flow_kgps": m["fuel_flow_kgps"], "lambda": m["lambda_val"],
         "turbo_rpm": m["turbo_rpm"], "comp_out_p_hPa": m["comp_out_p_hPa"],
         "comp_out_T_K": m["comp_out_T_K"], "throttle_pct": float(throttle_pct),
-        "vib_rms_g": None, "altitude_ft": float(tick.altitude_ft),
+        "vib_rms_g": _vib_rms_g(m["ripple"], tick.plant_params["detonation_sev"]),
+        "inj_timing_deg": round(_inj_timing_deg(m["rpm"], throttle_pct, ctx), 2),
+        "altitude_ft": float(tick.altitude_ft),
         "oat_K": m["oat_K"], "p_amb_hPa": m["p_amb_hPa"], "tas_mps": m["tas_mps"],
         "prop_rpm": m["prop_rpm"], "blade_angle_deg": m["blade_angle_deg"],
         "gearbox_oil_C": m["gearbox_oil_C"], "coolant_temp_C": m["coolant_temp_C"],
@@ -345,8 +393,8 @@ async def telemetry_endpoint(websocket: WebSocket) -> None:
                 kW = max(tick.out_twinA["brake_power_kW"], 0.01)
                 bsfc = (ff * 3_600_000.0) / kW
 
-                slow = _slow_frame(t, "A", mA, tick, tick.throttle_pct)
-                slowB = _slow_frame(t, "B", tick.measuredB, tick, tick.throttle_pct) if tick.measuredB else None
+                slow = _slow_frame(t, "A", mA, tick, tick.throttle_pct, ctx)
+                slowB = _slow_frame(t, "B", tick.measuredB, tick, tick.throttle_pct, ctx) if tick.measuredB else None
                 predicted = {k: pA[k] for k in ("egt_C", "cht_C", "oil_press_bar",
                                                 "map_hPa", "fuel_flow_kgps")}
                 det = tick.plant_params["detonation_sev"]
